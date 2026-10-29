@@ -14,7 +14,7 @@
     return;
   }
 
-  const { useState, useEffect, useMemo } = React || {};
+  const { useState, useEffect, useMemo, useRef } = React || {};
   const h = React ? React.createElement : () => {};
 
   // ==================== 1. DEFAULT SAMPLE DATA ====================
@@ -1860,7 +1860,37 @@
     }
   }
 
-  // ==================== 4. MASTER APP COMPONENT ====================
+  // ==================== 4. ERROR BOUNDARY & MASTER APP ====================
+  class ErrorBoundary extends (React && React.Component ? React.Component : Object) {
+    constructor(props) {
+      super(props);
+      this.state = { hasError: false, error: null };
+    }
+    static getDerivedStateFromError(error) {
+      return { hasError: true, error };
+    }
+    componentDidCatch(error, errorInfo) {
+      console.error('CycleCare ErrorBoundary caught:', error, errorInfo);
+    }
+    render() {
+      if (this.state.hasError) {
+        if (this.props.fallback) return this.props.fallback;
+        return h('div', { className: 'min-h-screen bg-[#FFF5F7] flex items-center justify-center p-6 text-center' },
+          h('div', { className: 'max-w-md bg-white rounded-3xl p-8 shadow-xl border border-pink-100' },
+            h('div', { className: 'text-4xl mb-3' }, '🌸'),
+            h('h2', { className: 'text-xl font-bold text-slate-800 mb-2' }, 'CycleCare encountered a moment'),
+            h('p', { className: 'text-sm text-slate-600 mb-6 leading-relaxed' }, 'A temporary rendering glitch occurred. Your personal cycle data and logs are safe on your device.'),
+            h('button', {
+              onClick: () => { window.location.reload(); },
+              className: 'px-6 py-2.5 rounded-full bg-gradient-to-r from-pink-500 to-purple-600 text-white font-semibold text-sm shadow-md hover:shadow-lg transition-all cursor-pointer'
+            }, 'Reload CycleCare')
+          )
+        );
+      }
+      return this.props.children;
+    }
+  }
+
   function CycleCareApp() {
     const [authUser, setAuthUser] = useState(() => {
       const s = getStoredSession();
@@ -2249,12 +2279,21 @@
         h('span', null, 'Ask Maya AI')
       ),
 
-      aiModalOpen && h(AiCompanionModalView, {
+      aiModalOpen && h(ErrorBoundary, {
+        fallback: h('div', { className: 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm' },
+          h('div', { className: 'bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4' },
+            h('div', { className: 'text-3xl' }, '🌸'),
+            h('h3', { className: 'font-bold text-slate-800' }, 'Maya AI Assistant'),
+            h('p', { className: 'text-xs text-slate-600' }, 'We encountered a momentary glitch. Please close and re-open Maya.'),
+            h('button', { onClick: () => setAiModalOpen(false), className: 'px-5 py-2 rounded-full bg-pink-500 text-white font-bold text-xs' }, 'Close')
+          )
+        )
+      }, h(AiCompanionModalView, {
         isOpen: aiModalOpen,
         onClose: () => setAiModalOpen(false),
         cycleStatus,
         profile,
-      }),
+      })),
 
       pwaModalOpen && h(PwaInstallModalView, {
         isOpen: pwaModalOpen,
@@ -5638,23 +5677,31 @@
   }
 
   // ----- AI HEALTH COMPANION (MAYA AI) MODAL -----
-  function AiCompanionModalView({ isOpen, onClose, cycleStatus, profile }) {
+  function AiCompanionModalView({ isOpen, onClose, cycleStatus = {}, profile = {} }) {
+    const currentDay = cycleStatus?.currentCycleDay || 1;
+    const phaseTitle = cycleStatus?.phaseTitle || 'Cycle';
+    const userName = (profile?.isAnonymous) ? 'Friend' : ((profile?.name || 'there').split(' ')[0]);
+
     const [messages, setMessages] = useState(() => [
       {
         id: 'msg-init',
         sender: 'maya',
-        title: `Welcome, ${profile.isAnonymous ? 'Friend' : (profile.name || 'there').split(' ')[0]} 🌸`,
-        text: `I am Maya, your private on-device cycle companion. You are currently on Day ${cycleStatus.currentCycleDay} (${cycleStatus.phaseTitle} Phase). How can I assist you with your cycle, ovulation indicators, PMS management, nutrition, or reproductive wellness today?`,
+        title: `Welcome, ${userName} 🌸`,
+        text: `I am Maya, your private on-device cycle companion. You are currently on Day ${currentDay} (${phaseTitle} Phase). How can I assist you with your cycle, ovulation indicators, PMS management, nutrition, or reproductive wellness today?`,
         sources: 'CycleCare Clinical Knowledge Base · ACOG & WHO Reference Library',
       }
     ]);
     const [inputQuery, setInputQuery] = useState('');
     const [isTyping, setIsTyping] = useState(false);
-    const messagesEndRef = useRef(null);
+    const messagesEndRef = (typeof useRef === 'function') ? useRef(null) : { current: null };
 
     useEffect(() => {
-      if (messagesEndRef.current) {
-        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      try {
+        if (messagesEndRef && messagesEndRef.current && typeof messagesEndRef.current.scrollIntoView === 'function') {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+      } catch (e) {
+        // Safe scroll fallback
       }
     }, [messages, isTyping]);
 
@@ -5673,16 +5720,28 @@
       setIsTyping(true);
 
       setTimeout(() => {
-        const answer = askMayaAi(q, cycleStatus, profile);
-        const mayaMsg = {
-          id: `maya-${Date.now()}`,
-          sender: 'maya',
-          title: answer.title,
-          text: answer.reply,
-          sources: answer.sources,
-        };
-        setMessages(prev => [...prev, mayaMsg]);
-        setIsTyping(false);
+        try {
+          const answer = askMayaAi(q, cycleStatus || {}, profile || {});
+          const mayaMsg = {
+            id: `maya-${Date.now()}`,
+            sender: 'maya',
+            title: answer?.title || 'Cycle Guidance',
+            text: answer?.reply || 'Stay tuned to your natural cycle rhythms.',
+            sources: answer?.sources || 'CycleCare Clinical Guidelines',
+          };
+          setMessages(prev => [...prev, mayaMsg]);
+        } catch (err) {
+          console.error('Maya AI processing error:', err);
+          setMessages(prev => [...prev, {
+            id: `maya-${Date.now()}`,
+            sender: 'maya',
+            title: 'Cycle Awareness',
+            text: `Regarding "${q}": Hormonal rhythms across each phase influence energy and wellness. Prioritizing rest, hydration, and recording symptoms in your tracker helps build a clear personal cycle profile.`,
+            sources: 'ACOG Practice Guidelines',
+          }]);
+        } finally {
+          setIsTyping(false);
+        }
       }, 350);
     };
 
@@ -5708,7 +5767,7 @@
                 h('h3', { className: 'font-extrabold text-base tracking-tight' }, 'Maya AI Companion'),
                 h('span', { className: 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/20 text-white border border-white/30' }, 'Private & On-Device')
               ),
-              h('p', { className: 'text-xs text-white/90' }, `Day ${cycleStatus.currentCycleDay} (${cycleStatus.phaseTitle}) · Evidence-Based Awareness`)
+              h('p', { className: 'text-xs text-white/90' }, `Day ${currentDay} (${phaseTitle}) · Evidence-Based Awareness`)
             )
           ),
           h('button', {
@@ -6011,7 +6070,7 @@
     const rootElement = document.getElementById('root');
     if (rootElement && ReactDOM) {
       const root = ReactDOM.createRoot(rootElement);
-      root.render(h(React.StrictMode, null, h(CycleCareApp)));
+      root.render(h(React.StrictMode, null, h(ErrorBoundary, null, h(CycleCareApp))));
     }
   }
 
