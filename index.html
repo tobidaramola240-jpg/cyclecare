@@ -62,14 +62,26 @@
   <script src="/env.js"></script>
 
   <!-- CycleCare Master Script -->
-  <script src="cyclecare.js?v=1.0.5"></script>
+  <script src="cyclecare.js?v=1.0.6"></script>
 
   <!-- Service Worker Registration -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch((err) => {
+        navigator.serviceWorker.register('/sw.js').then((reg) => {
+          // Immediately check for updated service worker
+          reg.update();
+        }).catch((err) => {
           console.log('ServiceWorker registration error:', err);
+        });
+
+        // Auto-refresh when new service worker takes control
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!refreshing) {
+            refreshing = true;
+            window.location.reload();
+          }
         });
       });
     }

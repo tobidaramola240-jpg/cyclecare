@@ -5128,6 +5128,25 @@
       h('section', { className: 'bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4' },
         h('h3', { className: 'text-sm font-bold text-slate-800' }, '💾 Data Management & Backups'),
         h('div', { className: 'flex flex-wrap gap-3' },
+          h('button', {
+            type: 'button',
+            onClick: async () => {
+              try {
+                if (typeof window !== 'undefined' && 'caches' in window) {
+                  const keys = await caches.keys();
+                  await Promise.all(keys.map(k => caches.delete(k)));
+                }
+                if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+                  const regs = await navigator.serviceWorker.getRegistrations();
+                  for (let r of regs) { await r.unregister(); }
+                }
+              } catch (e) {
+                console.warn(e);
+              }
+              window.location.reload(true);
+            },
+            className: 'py-2.5 px-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 hover:bg-amber-100 transition-colors flex items-center gap-1.5'
+          }, '⚡ Update & Clear App Cache'),
           h('button', { onClick: handleExportCalendarIcs, className: 'py-2.5 px-4 rounded-2xl bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors flex items-center gap-1.5' }, '📅 Export to Calendar (.ICS)'),
           h('button', { onClick: onOpenPwaModal, className: 'py-2.5 px-4 rounded-2xl bg-pink-50 border border-pink-200 text-xs font-bold text-pink-700 hover:bg-pink-100 transition-colors flex items-center gap-1.5' }, '📱 Install Mobile App (PWA)'),
           h('button', { onClick: downloadBackupJson, className: 'py-2.5 px-4 rounded-2xl bg-pink-50 border border-pink-200 text-xs font-bold text-pink-700' }, '📥 Download Backup (JSON)'),
