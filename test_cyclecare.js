@@ -516,6 +516,20 @@ async function main() {
       assert(res.sources.includes('ACOG'));
     });
 
+    runTest('Answers direct transparency and honesty queries with clear clinical boundaries', () => {
+      const res = askMayaAi('can you be honest with me', sampleStatus, DEFAULT_USER_PROFILE);
+      assert.strictEqual(res.matched, true);
+      assert.strictEqual(res.title, 'Complete Transparency & Honesty');
+      assert(res.reply.includes('100% honest and transparent'));
+      assert(res.reply.includes('ACOG'));
+    });
+
+    runTest('Answers identity queries directly with Maya introduction', () => {
+      const res = askMayaAi('who are you', sampleStatus, DEFAULT_USER_PROFILE);
+      assert.strictEqual(res.matched, true);
+      assert(res.reply.includes('I am Maya'));
+    });
+
     // ----------------------------------------------------
     // Suite 11: iCalendar (.ICS) Schedule & Reminder Exporter
     // ----------------------------------------------------

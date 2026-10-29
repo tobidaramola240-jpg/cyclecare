@@ -937,50 +937,128 @@
 };
 
   const AI_KNOWLEDGE_TOPICS = [
+    // 1. Honesty, Trust, & Transparency
+    {
+      keywords: ['honest', 'truth', 'trust you', 'be real', 'be honest', 'lying', 'tell the truth', 'are you lying', 'can i trust', 'can you be honest'],
+      title: 'Complete Transparency & Honesty',
+      reply: 'Yes, absolutely. I will always be 100% honest and transparent with you.\n\nHere is what you can always count on from me:\n• Evidence-Based Answers: Everything I share is grounded in peer-reviewed clinical guidelines from the American College of Obstetricians and Gynecologists (ACOG), the World Health Organization (WHO), and the Endocrine Society.\n• No False Guarantees: I am an AI companion, not a human doctor. I cannot provide a medical diagnosis, prescribe drugs, or guarantee conception or contraception.\n• What I Don\'t Know, I Won\'t Guess: If a symptom requires clinical evaluation (like severe sudden pelvic pain, fainting, or abnormal bleeding), I will tell you honestly and urge you to see a licensed physician.\n• Complete Privacy: Your questions and cycle logs never leave your device without your explicit permission.\n\nWhat is on your mind? You can ask me anything about your symptoms, cycle, body, or how you are feeling.',
+      sources: 'CycleCare Clinical Ethics Framework · ACOG & WHO Standards',
+    },
+    // 2. Identity & Who You Are
+    {
+      keywords: ['who are you', 'what are you', 'your name', 'who made you', 'who created you', 'what is maya'],
+      title: 'Meet Maya — Your Personal Cycle Companion',
+      reply: 'I am Maya, your private on-device cycle and reproductive wellness companion in CycleCare. I am designed to help you decode your hormonal rhythms, recognize ovulation and fertile windows, find relief from cramps and PMS, sync nutrition with your cycle phases, and answer your health questions honestly and privately.',
+      sources: 'CycleCare Women\'s Health Architecture',
+    },
+    // 3. Greetings & Well-being
+    {
+      keywords: ['hello', 'hi maya', 'hey maya', 'good morning', 'good afternoon', 'good evening', 'greetings', 'how are you', 'how r u', 'how are u', 'how you doing'],
+      title: 'Hello 🌸 Welcome to Maya AI',
+      reply: 'Hello! I am doing well, thank you for checking in. 🌸 How are you feeling today? Whether you are experiencing symptoms, curious about your current cycle phase, looking for nutrition ideas, or just want to chat, I am right here with you. What can I help you with?',
+      sources: 'CycleCare Mindful Health Companion',
+    },
+    // 4. Capabilities & Help
+    {
+      keywords: ['what can you do', 'how can you help', 'what do you do', 'capabilities', 'help me with', 'can you help me'],
+      title: 'How Maya Can Assist You',
+      reply: 'I can help you with:\n1. Cycle & Hormone Explanations: Understand what is occurring in your menstrual, follicular, ovulatory, and luteal phases.\n2. Fertility & Ovulation: Pinpoint your fertile window, interpret LH test strips, and track cervical mucus changes.\n3. Symptom Management: Evidence-based relief for cramps, PMS mood swings, bloating, headaches, and fatigue.\n4. Cycle Syncing: Recommended foods, exercises, and sleep habits for each phase.\n5. Contraceptive Protocols: Clear ACOG instructions for missed birth control pills.\n6. Private Q&A: Honest, non-judgmental answers to your personal reproductive questions.',
+      sources: 'CycleCare Clinical & Reproductive Health Library',
+    },
+    // 5. Gratitude
+    {
+      keywords: ['thank you', 'thanks', 'appreciate it', 'thank u', 'thx'],
+      title: 'You Are Very Welcome 🌸',
+      reply: 'You are so welcome! Taking time to listen to your body and understand your cycle is deeply empowering. If you ever have any other questions—big or small—I will always be right here.',
+      sources: 'CycleCare Mindful Health Companion',
+    },
+    // 6. Pregnancy Risk & Conception
+    {
+      keywords: ['can i get pregnant', 'pregnant during period', 'am i pregnant', 'chance of pregnancy', 'unprotected sex', 'getting pregnant on period', 'conception risk', 'can you get pregnant on your period'],
+      title: 'Conception Timing & Pregnancy Probability',
+      reply: 'Here is the direct biological truth:\n• Peak Risk / Chance: Pregnancy occurs when viable sperm fertilizes an egg. Sperm can survive up to 5 days in fertile cervical mucus, while a released egg lives for 12–24 hours. Your highest chance of pregnancy is during the 5 days before ovulation and ovulation day itself.\n• Can you get pregnant during your period? Yes, though less common. If your cycle is short (e.g. 21–24 days) or you bleed for 6–7 days, ovulation can occur shortly after bleeding stops, meaning sperm from period intercourse may still be alive when the egg is released.\n• Emergency Contraception: If you had unprotected sex and want to prevent pregnancy, emergency contraception (like Plan B/levonorgestrel or Ella/ulipristal) is most effective when taken within 72 hours.\n• Late Period: If your period is delayed by 5+ days after intercourse, take an at-home hCG pregnancy test with first-morning urine for a definitive answer.',
+      sources: 'ACOG Practice Bulletin #206; New England Journal of Medicine (NEJM)',
+    },
+    // 7. Fatigue & Energy
+    {
+      keywords: ['tired', 'fatigue', 'exhausted', 'no energy', 'sleepy', 'lethargic', 'low energy', 'why am i so tired', 'why am i tired'],
+      title: 'Why Am I So Tired? Hormones & Energy Levels',
+      reply: 'Hormonal shifts directly drive your daily stamina:\n• Menstrual Phase: Estrogen and progesterone are at baseline, and blood loss reduces circulating iron, signaling your body to rest and restore.\n• Mid-Luteal Phase: Elevated progesterone stimulates GABA receptors, acting as a natural mild sedative and making you feel drowsy or sluggish.\n• Blood Sugar Dips: Progesterone decreases insulin sensitivity, causing sharper sugar crashes if you go too long between balanced meals.\n• Recommendations: Prioritize 8 hours of sleep, hydrate with electrolytes, consume iron-rich foods with vitamin C (lentils, spinach, pumpkin seeds), and swap intense cardio for restorative walking or stretching.',
+      sources: 'The Journal of Clinical Endocrinology & Metabolism; Sleep Medicine Reviews',
+    },
+    // 8. Period Sex
+    {
+      keywords: ['sex during period', 'intercourse during period', 'period sex', 'safe to have sex on period', 'can i have sex on my period'],
+      title: 'Intimacy & Sex During Menstruation',
+      reply: 'Yes, having sex during your period is medically safe, healthy, and normal.\n• Cramp Relief: Orgasms trigger uterine muscle contractions that release natural endorphins and oxytocin, which significantly relieve menstrual cramps. Period blood also acts as a natural lubricant.\n• Pregnancy Risk: Pregnancy is still biologically possible, especially if your cycle is shorter than 28 days.\n• STI Protection: Because the cervix is slightly open during menstruation to allow blood to exit, barrier protection (condoms) is strongly recommended to protect against sexually transmitted infections and blood-borne pathogens.',
+      sources: 'ACOG Clinical Guidelines; International Society for Sexual Medicine',
+    },
+    // 9. Period Blood Colors & Clots
+    {
+      keywords: ['blood color', 'black blood', 'brown blood', 'blood clot', 'clots in period', 'bright red blood', 'pink blood', 'dark blood'],
+      title: 'Decoding Period Blood Colors & Clots',
+      reply: 'Period blood changes color based on how fast it exits your uterus and reacts with oxygen:\n• Brown or Dark / Black: This is normal older blood that took longer to shed and oxidized before exiting. It is extremely common at the very start or end of your period.\n• Bright Red: Fresh blood that is shedding actively. Typical during heavier flow days (Days 1–3).\n• Pink / Watery: Blood diluted with cervical mucus, common during light spotting or early follicular days.\n• Clots: Small jelly-like clots (smaller than a quarter) are a normal part of endometrial tissue shedding. Clots larger than a quarter or soaking through a pad every hour for 2+ consecutive hours should be checked by a doctor.',
+      sources: 'ACOG Abnormal Uterine Bleeding Guidelines; Cleveland Clinic Women\'s Health',
+    },
+    // 10. Late / Delayed Period
+    {
+      keywords: ['why is my period late', 'period late', 'period delayed', 'missed period', 'where is my period', 'not coming', 'late period'],
+      title: 'Why Is My Period Late? Common Causes',
+      reply: 'If your period is delayed, here are the most frequent biological reasons:\n1. Acute Stress: High cortisol suppresses GnRH secretion from the hypothalamus, delaying the LH surge needed for ovulation. When ovulation is delayed, your period is delayed by the exact same amount of time.\n2. Recent Illness or Travel: Jet lag and immune stress disrupt circadian pituitary rhythms.\n3. Pregnancy: If you had intercourse since your last cycle, an at-home hCG test taken 14 days post-intercourse or on the day of a missed period gives a definitive answer.\n4. Weight Shifts or Intensive Workouts: Rapid caloric restriction or sudden intense athletic training causes the body to enter energy conservation mode.\n5. Thyroid or PCOS Variations: Irregular hormone production can prolong the follicular phase.',
+      sources: 'Endocrine Society Clinical Practice Guidelines; ACOG Practice Bulletin #216',
+    },
+    // 11. Menstrual Cramps & Pain
     {
       keywords: ['cramp', 'pain', 'dysmenorrhea', 'ache', 'hurts', 'period pain'],
       title: 'Menstrual Cramps & Pelvic Tension Relief',
       reply: 'Menstrual cramps (primary dysmenorrhea) are caused by prostaglandins—hormone-like compounds that trigger uterine muscle contractions to shed the endometrium. To relieve cramps effectively: (1) Apply continuous topical heat (40°C/104°F) with a heating pad, which studies show is as effective as ibuprofen; (2) Supplement with 300–400mg Magnesium Glycinate, which calms smooth muscle spasms; (3) Try gentle pelvic rocking or child’s pose; (4) Sip hot ginger or chamomile tea. Note: Debilitating pain that resists standard pain relievers warrants evaluation for endometriosis or adenomyosis.',
       sources: 'ACOG Practice Bulletin #218; Cochrane Systematic Review on Thermal Therapy',
     },
+    // 12. Late Luteal Mood & PMS
     {
       keywords: ['luteal', 'pms', 'mood', 'irritable', 'sad', 'crying', 'sensitive', 'anger', 'brain fog'],
       title: 'Late Luteal Phase Mood Swings & PMS',
       reply: 'During your late luteal phase (the 7–10 days before bleeding), progesterone rises and then plummets alongside estrogen. This abrupt hormonal withdrawal lowers brain serotonin and GABA sensitivity, prompting mood variability, irritability, and sweet cravings. To smooth this transition: (1) Eat complex, slow-burning carbohydrates (sweet potato, squash, oats) to stabilize blood glucose and fuel serotonin synthesis; (2) Avoid skipping meals, which spikes cortisol; (3) Increase vitamin B6 and magnesium; (4) Schedule gentler workouts like walking or yin yoga.',
       sources: 'The Lancet Psychiatry; Journal of Affective Disorders (2024)',
     },
+    // 13. Ovulation & Fertility
     {
       keywords: ['ovulat', 'fertile', 'conceive', 'pregnancy chance', 'getting pregnant', 'egg'],
       title: 'Pinpointing Ovulation & Peak Fertile Days',
       reply: 'The biological fertile window spans approximately 6 days: the 5 days before ovulation plus ovulation day itself. Sperm can survive up to 5 days in fertile cervical fluid, while the released egg lives for 12–24 hours. The highest conception probability occurs 1–2 days before ovulation. Key biological signs include: (1) "Egg white" stretchy, slippery cervical mucus; (2) An LH surge detected on urinary test strips (ovulation occurs 24–36 hours post-surge); (3) A slight libido surge and heightened energy; (4) A sustained 0.4°F–0.8°F rise in Basal Body Temperature after ovulation.',
       sources: 'New England Journal of Medicine (NEJM); ACOG Fertility Awareness Guidelines',
     },
+    // 14. Cervical Mucus
     {
       keywords: ['mucus', 'discharge', 'cervical', 'fluid', 'wet', 'dry', 'egg white'],
       title: 'Decoding Cervical Mucus Across Your Cycle',
       reply: 'Cervical fluid shifts predictably as estrogen rises: (1) Post-menstrual: Dry or pasty white (Low fertility); (2) Early Follicular: Creamy like lotion (Low-to-medium fertility); (3) Near Ovulation: Watery, slippery, clear, and stretchy like raw egg whites (Peak fertility—this fluid nourishes and transports sperm); (4) Post-Ovulation/Luteal: Thick, sticky, or dry due to progesterone closing the cervix.',
       sources: 'World Health Organization (WHO) Reproductive Health Guidelines',
     },
+    // 15. Missed Pills
     {
       keywords: ['missed', 'forgot', 'pill', 'birth control', 'contraceptive', 'late'],
       title: 'ACOG Protocol for Missed Oral Contraceptive Pills',
       reply: 'According to ACOG guidelines for combined oral contraceptives: (1) If you missed 1 active pill (<48 hours): Take it as soon as you remember, even if it means taking two pills on the same day. Continue your pack as normal. Backup contraception is generally not needed. (2) If you missed 2 or more active pills (≥48 hours): Take the most recent missed pill immediately (discard older missed ones). Continue taking remaining pills on schedule AND use backup barrier contraception (condoms) for 7 consecutive days. If pills were missed in the 3rd week, skip the placebo week and start a fresh pack immediately.',
       sources: 'ACOG Clinical Practice Guideline #5; CDC Selected Practice Recommendations for Contraceptive Use',
     },
+    // 16. Cycle Syncing Nutrition
     {
       keywords: ['food', 'diet', 'eat', 'nutrition', 'sync', 'syncing'],
       title: 'Phase-Specific Cycle Syncing Nutrition',
       reply: 'Nutritional requirements shift with metabolic rate: (1) Menstrual Phase: Iron-rich lentils, spinach, vitamin C for absorption, and hydrating bone/vegetable broths. (2) Follicular Phase: Fermented foods (kimchi, kefir), sprouted grains, and lean proteins to support egg development. (3) Ovulatory Phase: Cruciferous greens (broccoli, kale, arugula) containing DIM to support liver estrogen clearance. (4) Luteal Phase: Complex carbs (sweet potato, quinoa, pumpkin seeds) to prevent blood sugar crashes, plus magnesium and healthy fats.',
       sources: 'American Journal of Clinical Nutrition; Journal of the Academy of Nutrition and Dietetics',
     },
+    // 17. Spotting
     {
       keywords: ['spotting', 'bleeding between', 'brown', 'mid-cycle'],
       title: 'Mid-Cycle Spotting & Light Bleeding',
       reply: 'Light mid-cycle spotting can occur for several reasons: (1) Ovulation spotting: The temporary drop in estrogen right as the egg releases can cause slight endometrial shedding for 1–2 days. (2) Implantation bleeding: Occurs 6–12 days after conception when an embryo embeds in the uterine wall—typically very light pink or brown and lasting 24–48 hours. (3) Hormonal adjustment to birth control. If spotting is heavy, painful, or accompanied by foul odor, consult a physician.',
       sources: 'Mayo Clinic Women\'s Health Guidelines; OB/GYN Clinical Review',
     },
+    // 18. Irregular Cycles
     {
-      keywords: ['irregular', 'late period', 'delayed', 'pcos', 'skip'],
+      keywords: ['irregular', 'pcos', 'skip'],
       title: 'Irregular Cycles & Fluctuating Intervals',
       reply: 'A cycle varying by 2–4 days from month to month is biologically normal. However, cycles consistently shorter than 21 days or longer than 35 days, or variations exceeding 7–9 days, are considered irregular. Common triggers include: acute psychological stress, intense travel/jet lag, significant weight shifts, thyroid imbalances, or Polycystic Ovary Syndrome (PCOS). In CycleCare, toggling "Irregular Cycle" in calibration automatically widens your prediction window so you avoid false certainty.',
       sources: 'Endocrine Society Clinical Practice Guidelines; FIGO Menstrual Disorders Committee',
@@ -988,7 +1066,9 @@
   ];
 
   function askMayaAi(userQuestion, cycleStatus, profile) {
-    const cleanQ = (userQuestion || '').toLowerCase();
+    const cleanQ = (userQuestion || '').toLowerCase().trim();
+
+    // Check matched topics
     for (const item of AI_KNOWLEDGE_TOPICS) {
       if (item.keywords.some(k => cleanQ.includes(k))) {
         return {
@@ -1000,9 +1080,14 @@
       }
     }
 
+    // Direct, honest conversational fallback for uncataloged inquiries
+    const currentDay = cycleStatus?.currentCycleDay || 1;
+    const phaseTitle = cycleStatus?.phaseTitle || 'Current Phase';
+    const phaseDesc = cycleStatus?.phaseDescription || 'natural biological rhythms';
+
     return {
-      title: `Cycle Insights for Day ${cycleStatus.currentCycleDay} (${cycleStatus.phaseTitle})`,
-      reply: `Regarding "${userQuestion}": In your current ${cycleStatus.phaseTitle} (Cycle Day ${cycleStatus.currentCycleDay}), your body is experiencing ${cycleStatus.phaseDescription.toLowerCase()} Hormones such as estrogen and progesterone follow natural rhythms that influence physical stamina, cervical markers, and emotional state. Maintaining adequate hydration, prioritizing 7–8 hours of restorative sleep, and recording changes in your CycleCare tracker will provide deeper personalized trend patterns.`,
+      title: `Cycle Awareness for Day ${currentDay} (${phaseTitle})`,
+      reply: `I hear your question: "${userQuestion}". As your on-device cycle companion, I specialize in menstrual cycle biology, fertility indicators, PMS relief, and reproductive wellness.\n\nWhile I don't have a direct pre-written clinical protocol for that exact wording, here is what your body is experiencing right now: In your current ${phaseTitle} (Cycle Day ${currentDay}), your body is undergoing ${phaseDesc.toLowerCase()} Hormones like estrogen and progesterone follow predictable rhythms that influence your physical stamina and mood.\n\nIf you have a question about specific symptoms, fertility, cramps, nutrition, or missed pills, please feel free to ask me directly!`,
       sources: 'CycleCare Clinical Knowledge Base · ACOG & Endocrine Society References',
       matched: false,
     };
