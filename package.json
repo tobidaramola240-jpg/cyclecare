@@ -1,0 +1,23 @@
+{
+  "name": "cyclecare",
+  "version": "1.0.0",
+  "description": "CycleCare — Modern, mobile-friendly women's health and mindful cycle tracking web app built with React, TypeScript, and Tailwind CSS.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "serve": "node server.js",
+    "test": "node test_cyclecare.js"
+  },
+  "keywords": [
+    "cyclecare",
+    "womens-health",
+    "period-tracker",
+    "react",
+    "typescript",
+    "tailwind",
+    "ovulation",
+    "fertility"
+  ],
+  "author": "CycleCare Team",
+  "license": "MIT"
+}

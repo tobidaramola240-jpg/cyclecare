@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Modern Login & Sign Up Template — Demo</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 and ReactDOM CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Environment variables injection -->
+  <script src="/env.js"></script>
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fadeIn {
+      animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased selection:bg-indigo-500 selection:text-white">
+  <div id="root"></div>
+
+  <script>
+    const { useState, createElement: h } = React;
+
+    function LoginApp() {
+      const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+      const [isLoading, setIsLoading] = useState(false);
+      const [errorMessage, setErrorMessage] = useState('');
+      const [successMessage, setSuccessMessage] = useState('');
+
+      // Form state
+      const [fullName, setFullName] = useState('');
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [confirmPassword, setConfirmPassword] = useState('');
+      const [showPassword, setShowPassword] = useState(false);
+      const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+      const [rememberMe, setRememberMe] = useState(true);
+      const [acceptTerms, setAcceptTerms] = useState(true);
+
+      // Errors
+      const [errors, setErrors] = useState({});
+
+      // Password strength
+      function getStrength(pass) {
+        if (!pass) return { score: 0, label: 'Empty', color: 'bg-slate-200' };
+        let s = 0;
+        if (pass.length >= 8) s++;
+        if (/[A-Z]/.test(pass)) s++;
+        if (/[0-9]/.test(pass)) s++;
+        if (/[^A-Za-z0-9]/.test(pass)) s++;
+        if (s <= 1) return { score: 25, label: 'Weak', color: 'bg-rose-500' };
+        if (s === 2) return { score: 50, label: 'Fair', color: 'bg-amber-500' };
+        if (s === 3) return { score: 75, label: 'Good', color: 'bg-blue-500' };
+        return { score: 100, label: 'Strong', color: 'bg-emerald-500' };
+      }
+
+      const strength = getStrength(password);
+
+      function validate() {
+        const errs = {};
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email.trim()) {
+          errs.email = 'Email address is required.';
+        } else if (!emailRegex.test(email.trim())) {
+          errs.email = 'Please enter a valid email format (e.g. you@domain.com).';
+        }
+
+        if (!password) {
+          errs.password = 'Password is required.';
+        } else if (password.length < 8) {
+          errs.password = 'Password must be at least 8 characters.';
+        }
+
+        if (mode === 'signup') {
+          if (!fullName.trim()) errs.fullName = 'Full name is required.';
+          if (password !== confirmPassword) errs.confirmPassword = 'Passwords do not match.';
+          if (!acceptTerms) errs.terms = 'Please accept the Terms of Service to continue.';
+        }
+
+        setErrors(errs);
+        return Object.keys(errs).length === 0;
+      }
+
+      async function handleSubmit(e) {
+        e.preventDefault();
+        setErrorMessage('');
+        setSuccessMessage('');
+
+        if (!validate()) return;
+
+        setIsLoading(true);
+
+        const cleanEmail = email.trim();
+        const cleanName = fullName.trim() || cleanEmail.split('@')[0];
+
+        // Check if real Supabase backend is configured in window.__ENV__ or localStorage
+        const supabaseUrl = ((window.__ENV__ && window.__ENV__.VITE_SUPABASE_URL) || localStorage.getItem('cyclecare_supabase_url') || '').trim();
+        const supabaseAnon = ((window.__ENV__ && window.__ENV__.VITE_SUPABASE_ANON_KEY) || localStorage.getItem('cyclecare_supabase_anon') || '').trim();
+        const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnon && !supabaseUrl.includes('your-project-id'));
+
+        if (isSupabaseConfigured) {
+          try {
+            if (mode === 'signin') {
+              const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+                method: 'POST',
+                headers: {
+                  'apikey': supabaseAnon,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ email: cleanEmail, password }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                throw new Error(data.error_description || data.msg || data.message || 'Authentication failed');
+              }
+              const session = {
+                accessToken: data.access_token,
+                refreshToken: data.refresh_token,
+                expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+                user: {
+                  id: data.user.id,
+                  email: data.user.email,
+                  fullName: (data.user.user_metadata && data.user.user_metadata.full_name) || cleanName,
+                  isAnonymous: false,
+                  createdAt: data.user.created_at,
+                },
+              };
+              localStorage.setItem('cyclecare_auth_session', JSON.stringify(session));
+              setSuccessMessage(`✓ Signed in successfully as ${cleanEmail}! Redirecting to CycleCare dashboard...`);
+              setTimeout(() => { window.location.href = '/'; }, 800);
+            } else {
+              // Sign up
+              const res = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+                method: 'POST',
+                headers: {
+                  'apikey': supabaseAnon,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  email: cleanEmail,
+                  password,
+                  data: { full_name: cleanName, is_anonymous: false },
+                }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                throw new Error(data.error_description || data.msg || data.message || 'Registration failed');
+              }
+              setSuccessMessage(`✓ Account created for ${cleanEmail}! Please check your email or sign in.`);
+              setMode('signin');
+            }
+          } catch (err) {
+            setErrorMessage(err.message || 'Authentication failed. Please verify credentials.');
+          } finally {
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        // Demo / Local Mode (instant sign-in & session setup when offline or before Supabase keys are entered)
+        setTimeout(() => {
+          setIsLoading(false);
+          const session = {
+            accessToken: 'demo-access-token',
+            refreshToken: 'demo-refresh-token',
+            expiresAt: Date.now() + 3600 * 1000,
+            user: {
+              id: 'demo-user-' + Date.now(),
+              email: cleanEmail,
+              fullName: cleanName,
+              isAnonymous: false,
+              createdAt: new Date().toISOString(),
+            },
+          };
+          try {
+            const currentProf = JSON.parse(localStorage.getItem('cyclecare_user_profile') || '{}');
+            localStorage.setItem('cyclecare_user_profile', JSON.stringify({
+              ...currentProf,
+              name: cleanName,
+              hasCompletedOnboarding: true,
+            }));
+          } catch (e) {}
+
+          localStorage.setItem('cyclecare_auth_session', JSON.stringify(session));
+
+          if (mode === 'signin') {
+            setSuccessMessage(`✓ Welcome back, ${cleanName}! Redirecting to CycleCare dashboard...`);
+            setTimeout(() => { window.location.href = '/'; }, 900);
+          } else {
+            setSuccessMessage(`✓ Account created for ${cleanName}! Redirecting to CycleCare dashboard...`);
+            setTimeout(() => { window.location.href = '/'; }, 900);
+          }
+        }, 600);
+      }
+
+      function switchMode(newMode) {
+        setMode(newMode);
+        setErrorMessage('');
+        setSuccessMessage('');
+        setErrors({});
+      }
+
+      return h('div', { className: 'min-h-screen w-full flex items-center justify-center p-4 sm:p-6 lg:p-8 relative overflow-hidden' },
+        // Top Return Link
+        h('div', { className: 'absolute top-5 left-5 z-20' },
+          h('a', {
+            href: '/',
+            className: 'flex items-center gap-2 px-3.5 py-2 rounded-full bg-white/90 backdrop-blur-md border border-slate-200 text-xs font-bold text-slate-700 hover:text-indigo-600 hover:border-indigo-300 shadow-sm transition-all'
+          }, '← Back to CycleCare')
+        ),
+
+        // Decorative background glowing spheres
+        h('div', { className: 'absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-indigo-300/40 via-purple-300/30 to-pink-200/20 blur-3xl pointer-events-none' }),
+        h('div', { className: 'absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-gradient-to-br from-blue-200/30 via-indigo-200/30 to-purple-300/40 blur-3xl pointer-events-none' }),
+
+        // Main Card
+        h('div', { className: 'w-full max-w-md bg-white/95 backdrop-blur-xl rounded-3xl border border-slate-200/80 shadow-2xl shadow-indigo-500/5 relative z-10 p-6 sm:p-8 transition-all' },
+          
+          // Header
+          h('div', { className: 'text-center mb-6' },
+            h('div', { className: 'inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/30 mb-3.5 transform hover:scale-105 transition-transform' },
+              h('svg', { className: 'w-7 h-7', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round' },
+                h('path', { d: 'M12 2L2 7l10 5 10-5-10-5z' }),
+                h('path', { d: 'M2 17l10 5 10-5' }),
+                h('path', { d: 'M2 12l10 5 10-5' })
+              )
+            ),
+            h('h1', { className: 'text-2xl font-extrabold text-slate-900 tracking-tight' }, 'Welcome to Your App'),
+            h('p', { className: 'text-xs text-slate-500 mt-1' }, 'Modern, responsive authentication interface')
+          ),
+
+          // Sign In / Sign Up Switcher Tabs
+          h('div', { className: 'flex p-1 bg-slate-100 rounded-2xl mb-6 relative' },
+            h('button', {
+              type: 'button',
+              onClick: () => switchMode('signin'),
+              className: `flex-1 py-2 text-xs font-bold rounded-xl transition-all ${mode === 'signin' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`
+            }, 'Sign In'),
+            h('button', {
+              type: 'button',
+              onClick: () => switchMode('signup'),
+              className: `flex-1 py-2 text-xs font-bold rounded-xl transition-all ${mode === 'signup' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`
+            }, 'Create Account')
+          ),
+
+          // Messages
+          errorMessage && h('div', { className: 'mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2 animate-fadeIn' },
+            h('span', null, '⚠️'),
+            h('span', { className: 'font-medium' }, errorMessage)
+          ),
+          successMessage && h('div', { className: 'mb-4 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-fadeIn' },
+            h('span', null, '✨'),
+            h('span', { className: 'font-medium' }, successMessage)
+          ),
+
+          // Form
+          h('form', { onSubmit: handleSubmit, noValidate: true, className: 'space-y-4' },
+            
+            // Full name (signup only)
+            mode === 'signup' && h('div', null,
+              h('label', { className: 'block text-xs font-bold text-slate-700 mb-1.5' }, 'Full Name'),
+              h('input', {
+                type: 'text',
+                placeholder: 'Alex Morgan',
+                value: fullName,
+                onChange: (e) => setFullName(e.target.value),
+                className: `w-full px-3.5 py-2.5 bg-slate-50/70 border rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all ${errors.fullName ? 'border-rose-400' : 'border-slate-200 focus:border-indigo-500'}`
+              }),
+              errors.fullName && h('p', { className: 'mt-1 text-[11px] font-semibold text-rose-600' }, errors.fullName)
+            ),
+
+            // Email
+            h('div', null,
+              h('label', { className: 'block text-xs font-bold text-slate-700 mb-1.5' }, 'Email Address'),
+              h('input', {
+                type: 'email',
+                placeholder: 'name@example.com',
+                value: email,
+                onChange: (e) => setEmail(e.target.value),
+                className: `w-full px-3.5 py-2.5 bg-slate-50/70 border rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all ${errors.email ? 'border-rose-400' : 'border-slate-200 focus:border-indigo-500'}`
+              }),
+              errors.email && h('p', { className: 'mt-1 text-[11px] font-semibold text-rose-600' }, errors.email)
+            ),
+
+            // Password
+            h('div', null,
+              h('div', { className: 'flex justify-between items-center mb-1.5' },
+                h('label', { className: 'block text-xs font-bold text-slate-700' }, 'Password'),
+                mode === 'signin' && h('button', {
+                  type: 'button',
+                  onClick: () => alert(`Password reset instructions sent to ${email || 'your email'}!`),
+                  className: 'text-[11px] font-semibold text-indigo-600 hover:text-indigo-800'
+                }, 'Forgot password?')
+              ),
+              h('div', { className: 'relative' },
+                h('input', {
+                  type: showPassword ? 'text' : 'password',
+                  placeholder: '••••••••',
+                  value: password,
+                  onChange: (e) => setPassword(e.target.value),
+                  className: `w-full pl-3.5 pr-10 py-2.5 bg-slate-50/70 border rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all ${errors.password ? 'border-rose-400' : 'border-slate-200 focus:border-indigo-500'}`
+                }),
+                h('button', {
+                  type: 'button',
+                  onClick: () => setShowPassword(!showPassword),
+                  className: 'absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 text-xs'
+                }, showPassword ? 'Hide' : 'Show')
+              ),
+              errors.password && h('p', { className: 'mt-1 text-[11px] font-semibold text-rose-600' }, errors.password),
+
+              // Password Strength Indicator (Sign Up)
+              mode === 'signup' && password.length > 0 && h('div', { className: 'mt-2 space-y-1' },
+                h('div', { className: 'flex justify-between text-[10px]' },
+                  h('span', { className: 'text-slate-500' }, 'Strength:'),
+                  h('span', { className: 'font-bold text-slate-700' }, strength.label)
+                ),
+                h('div', { className: 'h-1.5 w-full bg-slate-100 rounded-full overflow-hidden' },
+                  h('div', { style: { width: `${strength.score}%` }, className: `h-full ${strength.color} transition-all duration-300` })
+                )
+              )
+            ),
+
+            // Confirm Password (signup only)
+            mode === 'signup' && h('div', null,
+              h('label', { className: 'block text-xs font-bold text-slate-700 mb-1.5' }, 'Confirm Password'),
+              h('div', { className: 'relative' },
+                h('input', {
+                  type: showConfirmPassword ? 'text' : 'password',
+                  placeholder: '••••••••',
+                  value: confirmPassword,
+                  onChange: (e) => setConfirmPassword(e.target.value),
+                  className: `w-full pl-3.5 pr-10 py-2.5 bg-slate-50/70 border rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all ${errors.confirmPassword ? 'border-rose-400' : 'border-slate-200 focus:border-indigo-500'}`
+                }),
+                h('button', {
+                  type: 'button',
+                  onClick: () => setShowConfirmPassword(!showConfirmPassword),
+                  className: 'absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 text-xs'
+                }, showConfirmPassword ? 'Hide' : 'Show')
+              ),
+              errors.confirmPassword && h('p', { className: 'mt-1 text-[11px] font-semibold text-rose-600' }, errors.confirmPassword)
+            ),
+
+            // Checkbox
+            mode === 'signin' ? (
+              h('div', { className: 'flex items-center gap-2 pt-1' },
+                h('input', {
+                  id: 'remember-me',
+                  type: 'checkbox',
+                  checked: rememberMe,
+                  onChange: (e) => setRememberMe(e.target.checked),
+                  className: 'w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 accent-indigo-600 cursor-pointer'
+                }),
+                h('label', { htmlFor: 'remember-me', className: 'text-xs text-slate-600 font-medium cursor-pointer' }, 'Remember this device')
+              )
+            ) : (
+              h('div', { className: 'pt-1' },
+                h('label', { className: 'flex items-start gap-2 cursor-pointer' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: acceptTerms,
+                    onChange: (e) => setAcceptTerms(e.target.checked),
+                    className: 'w-4 h-4 mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 accent-indigo-600 cursor-pointer'
+                  }),
+                  h('span', { className: 'text-xs text-slate-600 leading-snug' }, 'I agree to the Terms of Service & Privacy Policy')
+                ),
+                errors.terms && h('p', { className: 'mt-1 text-[11px] font-semibold text-rose-600' }, errors.terms)
+              )
+            ),
+
+            // Submit Button
+            h('button', {
+              type: 'submit',
+              disabled: isLoading,
+              className: 'w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold text-xs tracking-wide shadow-md shadow-indigo-500/20 active:scale-[0.99] disabled:opacity-60 transition-all flex items-center justify-center gap-2'
+            },
+              isLoading ? (mode === 'signin' ? 'Authenticating...' : 'Creating Account...') : (mode === 'signin' ? 'Sign In to Account' : 'Create Free Account')
+            )
+          ),
+
+          // Footer Mode Switcher
+          h('div', { className: 'mt-6 text-center text-xs text-slate-500' },
+            mode === 'signin' ? (
+              h('span', null,
+                "Don't have an account yet? ",
+                h('button', {
+                  type: 'button',
+                  onClick: () => switchMode('signup'),
+                  className: 'font-bold text-indigo-600 hover:text-indigo-800 underline'
+                }, 'Sign up free')
+              )
+            ) : (
+              h('span', null,
+                'Already have an account? ',
+                h('button', {
+                  type: 'button',
+                  onClick: () => switchMode('signin'),
+                  className: 'font-bold text-indigo-600 hover:text-indigo-800 underline'
+                }, 'Sign in')
+              )
+            )
+          )
+        ),
+
+        // Watermark
+        h('div', { className: 'absolute bottom-4 text-center w-full text-[11px] text-slate-400 font-medium' },
+          'Standalone Login Component · Ready to copy & paste'
+        )
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(h(LoginApp));
+  </script>
+</body>
+</html>

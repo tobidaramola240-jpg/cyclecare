@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/env.js", "destination": "/api/env" },
+    { "source": "/api/health", "destination": "/api/health" },
+    { "source": "/login", "destination": "/login-demo.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

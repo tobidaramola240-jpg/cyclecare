@@ -1,0 +1,31 @@
+{
+  "name": "CycleCare — Mindful Women's Health & Cycle Companion",
+  "short_name": "CycleCare",
+  "description": "Modern, private women's health, period tracking, TTC and pregnancy companion designed with soft aesthetics and on-device privacy.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FFF5F7",
+  "theme_color": "#F472B6",
+  "icons": [
+    {
+      "src": "/assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["health", "lifestyle", "medical"]
+}
