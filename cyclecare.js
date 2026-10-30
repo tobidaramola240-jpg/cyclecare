@@ -2026,6 +2026,28 @@
     const [pwaModalOpen, setPwaModalOpen] = useState(false);
     const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
 
+    // Global Dynamic Font Scaling & Readability (Standard, Comfortable, Large, Extra Large)
+    const [textScale, setTextScale] = useState(() => {
+      try {
+        return localStorage.getItem('cyclecare_text_scale') || 'comfortable';
+      } catch (e) {
+        return 'comfortable';
+      }
+    });
+
+    useEffect(() => {
+      try {
+        document.documentElement.setAttribute('data-text-scale', textScale);
+        localStorage.setItem('cyclecare_text_scale', textScale);
+      } catch (e) {}
+    }, [textScale]);
+
+    const handleCycleTextScale = () => {
+      const scaleIds = ['standard', 'comfortable', 'large', 'xlarge'];
+      const nextIdx = (scaleIds.indexOf(textScale) + 1) % scaleIds.length;
+      setTextScale(scaleIds[nextIdx]);
+    };
+
     useEffect(() => {
       const handleBeforeInstall = (e) => {
         e.preventDefault();
@@ -2278,6 +2300,8 @@
             isSyncing,
             onOpenAiModal: () => setAiModalOpen(true),
             onOpenPwaModal: () => setPwaModalOpen(true),
+            textScale,
+            onCycleTextScale: handleCycleTextScale,
           }),
 
           h('main', { className: 'flex-1 p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8' },
@@ -2348,6 +2372,8 @@
               onSyncCloud: handleManualPushCloud,
               isSyncing,
               onOpenPwaModal: () => setPwaModalOpen(true),
+              textScale,
+              onSetTextScale: setTextScale,
             })
           )
         )
@@ -2405,6 +2431,8 @@
         onClose: () => setAiModalOpen(false),
         cycleStatus,
         profile,
+        textScale,
+        onCycleTextScale: handleCycleTextScale,
       })),
 
       pwaModalOpen && h(PwaInstallModalView, {
@@ -2443,7 +2471,7 @@
           ),
           h('div', null,
             h('span', { className: 'font-extrabold text-xl tracking-tight bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent block' }, 'CycleCare'),
-            h('p', { className: 'text-[11px] font-medium text-purple-900/60 uppercase tracking-wider' }, 'Mindful Cycle Wellness')
+            h('p', { className: 'text-xs font-semibold text-purple-900/70 uppercase tracking-wider' }, 'Mindful Cycle Wellness')
           )
         ),
 
@@ -2505,7 +2533,7 @@
               className: `flex flex-col items-center py-1 px-3 rounded-xl transition-all ${isActive ? 'text-pink-600' : 'text-slate-400'}`
             },
               h('span', { className: 'text-lg' }, item.icon),
-              h('span', { className: 'text-[10px] font-medium' }, item.label)
+              h('span', { className: 'text-xs font-semibold' }, item.label)
             );
           }),
           h('button', {
@@ -2520,7 +2548,7 @@
               className: `flex flex-col items-center py-1 px-3 rounded-xl transition-all ${isActive ? 'text-pink-600' : 'text-slate-400'}`
             },
               h('span', { className: 'text-lg' }, item.icon),
-              h('span', { className: 'text-[10px] font-medium' }, item.label)
+              h('span', { className: 'text-xs font-semibold' }, item.label)
             );
           })
         )
@@ -2529,7 +2557,7 @@
   }
 
   // ----- HEADER -----
-  function HeaderView({ profile, cycleStatus, currentPage, onNavigate, onOpenQuickLog, onTogglePinLock, authUser, onOpenAuthModal, isSyncing, onOpenAiModal, onOpenPwaModal }) {
+  function HeaderView({ profile, cycleStatus, currentPage, onNavigate, onOpenQuickLog, onTogglePinLock, authUser, onOpenAuthModal, isSyncing, onOpenAiModal, onOpenPwaModal, textScale = 'comfortable', onCycleTextScale }) {
     const displayName = profile.isAnonymous ? 'CycleCare Friend' : (profile.name || 'Maya').split(' ')[0];
 
     return h('header', { className: 'sticky top-0 z-20 bg-white/85 backdrop-blur-md border-b border-pink-100/70 px-4 sm:px-8 py-3.5 flex items-center justify-between' },
@@ -2565,6 +2593,18 @@
         },
           h('span', null, '💬'),
           h('span', { className: 'hidden sm:inline' }, 'Maya AI')
+        ),
+
+        // Text Size Toggle Button (A- / A+ scaling)
+        onCycleTextScale && h('button', {
+          type: 'button',
+          onClick: onCycleTextScale,
+          className: 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold bg-white/90 hover:bg-pink-50 text-slate-700 border border-pink-200/90 shadow-2xs transition-all cursor-pointer',
+          title: `Adjust text size (Current: ${textScale === 'standard' ? 'Normal 16px' : textScale === 'comfortable' ? 'Medium 18px' : textScale === 'large' ? 'Large 20px' : 'Extra Large 22px'}). Tap to scale up font size.`
+        },
+          h('span', { className: 'text-sm' }, '🔤'),
+          h('span', { className: 'hidden sm:inline font-semibold text-slate-500' }, 'Size:'),
+          h('span', { className: 'font-extrabold text-pink-600' }, textScale === 'standard' ? 'Normal' : textScale === 'comfortable' ? 'Medium' : textScale === 'large' ? 'Large' : 'XL')
         ),
 
         h('button', {
@@ -3040,19 +3080,19 @@
               // Quick Info Grid
               h('div', { className: 'grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2' },
                 h('div', { className: 'p-3.5 rounded-2xl bg-white/80 border border-pink-100/80 shadow-2xs' },
-                  h('span', { className: 'block text-[11px] text-slate-400 font-medium' }, 'Predicted Period'),
+                  h('span', { className: 'block text-xs text-slate-500 font-medium' }, 'Predicted Period'),
                   h('span', { className: 'block text-sm font-bold text-slate-800 mt-0.5' }, cycleStatus.nextPeriodDate),
-                  h('span', { className: 'block text-[10px] text-pink-600 font-semibold' }, `in ${cycleStatus.daysUntilNextPeriod} days`)
+                  h('span', { className: 'block text-xs text-pink-600 font-semibold' }, `in ${cycleStatus.daysUntilNextPeriod} days`)
                 ),
                 h('div', { className: 'p-3.5 rounded-2xl bg-white/80 border border-purple-100/80 shadow-2xs' },
-                  h('span', { className: 'block text-[11px] text-slate-400 font-medium' }, 'Ovulation Day'),
+                  h('span', { className: 'block text-xs text-slate-500 font-medium' }, 'Ovulation Day'),
                   h('span', { className: 'block text-sm font-bold text-slate-800 mt-0.5' }, cycleStatus.ovulationDate),
-                  h('span', { className: 'block text-[10px] text-purple-600 font-semibold' }, cycleStatus.isOvulationDay ? 'Today ★' : 'Predicted peak')
+                  h('span', { className: 'block text-xs text-purple-600 font-semibold' }, cycleStatus.isOvulationDay ? 'Today ★' : 'Predicted peak')
                 ),
                 h('div', { className: 'p-3.5 rounded-2xl bg-white/80 border border-pink-100/80 shadow-2xs col-span-2 sm:col-span-1' },
-                  h('span', { className: 'block text-[11px] text-slate-400 font-medium' }, 'Fertile Window'),
+                  h('span', { className: 'block text-xs text-slate-500 font-medium' }, 'Fertile Window'),
                   h('span', { className: 'block text-xs font-bold text-slate-800 mt-0.5' }, `${cycleStatus.fertileWindowStart} → ${cycleStatus.fertileWindowEnd}`),
-                  h('span', { className: 'block text-[10px] text-emerald-600 font-semibold' }, cycleStatus.isFertileWindow ? 'Active Window' : 'Estimated range')
+                  h('span', { className: 'block text-xs text-emerald-600 font-semibold' }, cycleStatus.isFertileWindow ? 'Active Window' : 'Estimated range')
                 )
               ),
 
@@ -4759,7 +4799,7 @@
   }
 
   // ----- SETTINGS & PRIVACY WITH CYCLE VALIDATION -----
-  function SettingsPrivacyView({ profile, cycleStatus, logs, onUpdateProfile, onResetDemoData, onClearAllData, onRevisitOnboarding, authUser, onOpenAuthModal, onSignOut, onSyncCloud, isSyncing, onOpenPwaModal }) {
+  function SettingsPrivacyView({ profile, cycleStatus, logs, onUpdateProfile, onResetDemoData, onClearAllData, onRevisitOnboarding, authUser, onOpenAuthModal, onSignOut, onSyncCloud, isSyncing, onOpenPwaModal, textScale = 'comfortable', onSetTextScale }) {
     const [pinInput, setPinInput] = useState(profile.pinCode || '1234');
     const [lastPeriodInput, setLastPeriodInput] = useState(profile.lastPeriodStartDate || '2026-10-15');
     const [cycleLengthInput, setCycleLengthInput] = useState(profile.averageCycleLength || 28);
@@ -4896,6 +4936,67 @@
         h('span', { className: 'text-xs font-bold text-pink-600 uppercase tracking-wider' }, 'Preferences & Security'),
         h('h2', { className: 'text-2xl font-extrabold text-slate-800 tracking-tight mt-0.5' }, 'Settings & Privacy'),
         h('p', { className: 'text-xs text-slate-500 mt-0.5' }, 'Full control over your health parameters, security lock, and data export')
+      ),
+
+      // 🔤 Display & Accessibility Section (Font Scaling)
+      h('section', { className: 'bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4' },
+        h('div', { className: 'flex items-center justify-between' },
+          h('div', { className: 'flex items-center gap-2.5' },
+            h('div', { className: 'w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-500 text-white flex items-center justify-center text-lg shadow-sm' }, '🔤'),
+            h('div', null,
+              h('h3', { className: 'text-sm sm:text-base font-bold text-slate-800' }, 'Display & Text Size (Accessibility)'),
+              h('p', { className: 'text-xs text-slate-500' }, 'Adjust the font size for comfortable reading across all screens and Maya AI.')
+            )
+          ),
+          h('span', { className: 'text-xs font-bold uppercase tracking-wider text-purple-700 bg-purple-100 px-2.5 py-0.5 rounded-full' }, 'Live Scaling')
+        ),
+
+        h('div', { className: 'grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1' },
+          [
+            { id: 'standard', name: 'Normal', size: '16px', desc: 'Standard compact' },
+            { id: 'comfortable', name: 'Medium', size: '18px', desc: 'Balanced & clear' },
+            { id: 'large', name: 'Large', size: '20px', desc: 'Easy read (Recommended)' },
+            { id: 'xlarge', name: 'Extra Large', size: '22px', desc: 'Maximum legibility' },
+          ].map(opt => {
+            const isSelected = textScale === opt.id;
+            return h('button', {
+              key: opt.id,
+              type: 'button',
+              onClick: () => onSetTextScale && onSetTextScale(opt.id),
+              className: `p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                isSelected
+                  ? 'bg-gradient-to-br from-pink-50 via-purple-50/50 to-white border-pink-400 ring-2 ring-pink-400/40 shadow-sm'
+                  : 'bg-white border-slate-200 hover:border-pink-200 hover:bg-pink-50/20'
+              }`
+            },
+              h('div', { className: 'flex items-center justify-between mb-1' },
+                h('span', { className: `text-xs font-extrabold ${isSelected ? 'text-pink-600' : 'text-slate-800'}` }, opt.name),
+                isSelected && h('span', { className: 'text-xs text-pink-600 font-bold' }, '✓')
+              ),
+              h('div', { className: 'text-xs font-semibold text-purple-900/80 mb-0.5' }, opt.size),
+              h('div', { className: 'text-xs text-slate-500 font-medium' }, opt.desc)
+            );
+          })
+        ),
+
+        // Live Readability Interactive Sample Card
+        h('div', { className: 'p-4 rounded-2xl bg-gradient-to-r from-pink-50/60 via-purple-50/40 to-white border border-pink-100 space-y-2' },
+          h('div', { className: 'flex items-center justify-between text-xs font-bold text-slate-700' },
+            h('span', { className: 'flex items-center gap-1.5 text-purple-900' },
+              h('span', null, '👁️'),
+              h('span', null, 'Live Typography Preview')
+            ),
+            h('span', { className: 'text-xs text-pink-600 font-extrabold' },
+              `Active: ${textScale === 'standard' ? 'Normal (16px)' : textScale === 'comfortable' ? 'Medium (18px)' : textScale === 'large' ? 'Large (20px)' : 'Extra Large (22px)'}`
+            )
+          ),
+          h('div', { className: 'p-3.5 rounded-xl bg-white border border-pink-100 shadow-2xs space-y-1.5' },
+            h('p', { className: 'text-xs font-bold text-purple-900' }, '🌸 Cycle Forecast · Fertile Window in 2 days'),
+            h('p', { className: 'text-sm text-slate-700 leading-relaxed' },
+              'Maya AI: "Your hormone levels are transitioning into the follicular surge. Make sure to hydrate, eat nourishing foods, and rest comfortably."'
+            )
+          )
+        )
       ),
 
       // Cycle Parameters Form
@@ -5832,7 +5933,7 @@
   }
 
   // ----- AI HEALTH COMPANION (MAYA AI) MODAL -----
-  function AiCompanionModalView({ isOpen, onClose, cycleStatus = {}, profile = {} }) {
+  function AiCompanionModalView({ isOpen, onClose, cycleStatus = {}, profile = {}, textScale = 'comfortable', onCycleTextScale }) {
     const currentDay = cycleStatus?.currentCycleDay || 1;
     const phaseTitle = cycleStatus?.phaseTitle || 'Cycle';
     const userName = (profile?.isAnonymous) ? 'Friend' : ((profile?.name || 'there').split(' ')[0]);
@@ -6099,18 +6200,24 @@ Guidelines:
           h('div', { className: 'flex items-center gap-3' },
             h('div', { className: 'w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center text-xl shadow-inner' }, '🌸'),
             h('div', null,
-              h('div', { className: 'flex items-center gap-2' },
+              h('div', { className: 'flex items-center gap-2 flex-wrap' },
                 h('h3', { className: 'font-extrabold text-base tracking-tight' }, 'Maya AI Companion'),
                 h('button', {
                   type: 'button',
                   onClick: () => { setTempKeyInput(userGeminiKey); setKeyTestError(null); setKeyTestSuccess(false); setApiKeyModalOpen(true); },
-                  className: `text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border transition-all cursor-pointer ${
+                  className: `text-xs uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border transition-all cursor-pointer ${
                     isGeminiReady
                       ? 'bg-emerald-500/30 text-emerald-100 border-emerald-300 shadow-xs'
                       : 'bg-white/20 hover:bg-white/30 text-white border-white/30'
                   }`,
                   title: 'Configure Google Gemini API Key for ChatGPT-style open answers'
-                }, isGeminiReady ? '✨ Gemini AI Active' : '⚡ Enable Gemini AI')
+                }, isGeminiReady ? '✨ Gemini AI Active' : '⚡ Enable Gemini AI'),
+                onCycleTextScale && h('button', {
+                  type: 'button',
+                  onClick: onCycleTextScale,
+                  className: 'text-xs font-bold px-2.5 py-0.5 rounded-full bg-white/20 hover:bg-white/30 text-white border border-white/30 transition-all cursor-pointer flex items-center gap-1',
+                  title: `Text Readability (Current: ${textScale === 'standard' ? 'Normal' : textScale === 'comfortable' ? 'Medium' : textScale === 'large' ? 'Large' : 'XL'}). Tap to enlarge font size.`
+                }, `🔤 ${textScale === 'standard' ? 'Normal' : textScale === 'comfortable' ? 'Medium' : textScale === 'large' ? 'Large' : 'XL'}`)
               ),
               h('p', { className: 'text-xs text-white/90' }, `Day ${currentDay} (${phaseTitle}) · ${isGeminiReady ? 'Live Generative AI' : 'On-Device Evidence Library'}`)
             )
@@ -6183,12 +6290,12 @@ Guidelines:
 
         // Quick Suggestion Chips
         h('div', { className: 'px-4 py-2.5 bg-pink-50/60 border-b border-pink-100/60 flex items-center gap-2 overflow-x-auto no-scrollbar' },
-          h('span', { className: 'text-[11px] font-bold text-pink-700 whitespace-nowrap' }, '💡 Quick Topics:'),
+          h('span', { className: 'text-xs font-bold text-pink-700 whitespace-nowrap' }, '💡 Quick Topics:'),
           suggestedPrompts.map((prompt, idx) => h('button', {
             key: idx,
             type: 'button',
             onClick: () => handleSend(prompt),
-            className: 'text-[11px] font-medium bg-white hover:bg-pink-100/70 text-slate-700 hover:text-pink-900 px-3 py-1 rounded-full border border-pink-200/80 whitespace-nowrap transition-all shadow-2xs'
+            className: 'text-xs font-semibold bg-white hover:bg-pink-100/70 text-slate-700 hover:text-pink-900 px-3 py-1.5 rounded-full border border-pink-200/80 whitespace-nowrap transition-all shadow-2xs cursor-pointer'
           }, prompt))
         ),
 
@@ -6197,21 +6304,21 @@ Guidelines:
           messages.map(msg => {
             if (msg.sender === 'user') {
               return h('div', { key: msg.id, className: 'flex justify-end animate-fadeIn' },
-                h('div', { className: 'max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-xs px-4 py-3 bg-gradient-to-r from-pink-500 to-purple-600 text-white text-xs sm:text-sm leading-relaxed shadow-sm' },
+                h('div', { className: 'max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-xs px-4 py-3 bg-gradient-to-r from-pink-500 to-purple-600 text-white text-sm sm:text-base leading-relaxed shadow-sm' },
                   msg.text
                 )
               );
             }
 
             return h('div', { key: msg.id, className: 'flex items-start gap-2.5 max-w-[92%] sm:max-w-[85%] animate-fadeIn' },
-              h('div', { className: 'w-7 h-7 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-2xs' }, '🌸'),
-              h('div', { className: 'space-y-1.5 bg-white p-4 rounded-2xl rounded-tl-xs border border-pink-100 shadow-sm text-xs sm:text-sm text-slate-800' },
-                msg.title && h('h4', { className: 'font-bold text-purple-900 text-xs sm:text-sm flex items-center gap-1.5' },
+              h('div', { className: 'w-8 h-8 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center text-sm font-bold shrink-0 mt-0.5 shadow-2xs' }, '🌸'),
+              h('div', { className: 'space-y-2 bg-white p-4 sm:p-5 rounded-2xl rounded-tl-xs border border-pink-100 shadow-sm text-slate-800' },
+                msg.title && h('h4', { className: 'font-bold text-purple-900 text-sm sm:text-base flex items-center gap-1.5' },
                   h('span', null, '✨'),
                   h('span', null, msg.title)
                 ),
-                h('p', { className: 'text-slate-700 leading-relaxed text-xs' }, msg.text),
-                msg.sources && h('div', { className: 'pt-2 border-t border-slate-100 text-[10px] text-purple-700/80 font-medium flex items-center gap-1' },
+                h('p', { className: 'text-slate-800 leading-relaxed text-sm sm:text-base whitespace-pre-wrap select-text' }, msg.text),
+                msg.sources && h('div', { className: 'pt-2 border-t border-slate-100 text-xs text-purple-700/90 font-medium flex items-center gap-1.5' },
                   h('span', null, '📚'),
                   h('span', null, msg.sources)
                 )
@@ -6219,11 +6326,11 @@ Guidelines:
             );
           }),
 
-          isTyping && h('div', { className: 'flex items-center gap-2 text-xs text-purple-600 font-medium px-2' },
+          isTyping && h('div', { className: 'flex items-center gap-2 text-xs sm:text-sm text-purple-600 font-medium px-2' },
             h('span', { className: 'w-2 h-2 rounded-full bg-pink-500 animate-bounce' }),
             h('span', { className: 'w-2 h-2 rounded-full bg-purple-500 animate-bounce [animation-delay:0.2s]' }),
             h('span', { className: 'w-2 h-2 rounded-full bg-indigo-500 animate-bounce [animation-delay:0.4s]' }),
-            h('span', { className: 'text-slate-400 text-[11px] ml-1' }, 'Maya is consulting clinical references...')
+            h('span', { className: 'text-slate-500 text-xs ml-1' }, 'Maya is consulting clinical references...')
           ),
 
           h('div', { ref: messagesEndRef })
@@ -6242,12 +6349,12 @@ Guidelines:
             value: inputQuery,
             onChange: (e) => setInputQuery(e.target.value),
             placeholder: 'Ask about cramps, luteal food, ovulation signs, pills...',
-            className: 'flex-1 px-4 py-2.5 rounded-2xl border border-pink-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-pink-400 bg-pink-50/20'
+            className: 'flex-1 px-4 py-2.5 rounded-2xl border border-pink-200 text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-pink-400 bg-pink-50/20'
           }),
           h('button', {
             type: 'submit',
             disabled: !inputQuery.trim(),
-            className: 'px-4 py-2.5 rounded-2xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold text-xs hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center gap-1.5'
+            className: 'px-4 py-2.5 rounded-2xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold text-xs sm:text-sm hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center gap-1.5 cursor-pointer'
           },
             h('span', { className: 'hidden sm:inline' }, 'Ask Maya'),
             h('span', null, '➤')
@@ -6255,7 +6362,7 @@ Guidelines:
         ),
 
         // Bottom Disclaimer
-        h('div', { className: 'px-4 py-2 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-400 text-center' },
+        h('div', { className: 'px-4 py-2.5 bg-slate-50 border-t border-slate-100 text-xs text-slate-500 text-center font-medium' },
           '⚠️ Maya AI is for personal wellness awareness and cycle education only. Not intended for clinical diagnosis or contraception.'
         )
       )

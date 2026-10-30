@@ -1,6 +1,6 @@
 {
   "name": "cyclecare",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "CycleCare — Modern, mobile-friendly women's health and mindful cycle tracking web app built with React, TypeScript, and Tailwind CSS.",
   "main": "server.js",
   "scripts": {

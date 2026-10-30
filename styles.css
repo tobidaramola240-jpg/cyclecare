@@ -4,6 +4,8 @@
   html {
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
+    font-size: 18px; /* Accessible comfortable base font size */
+    transition: font-size 0.2s ease;
   }
 
   body {
@@ -11,6 +13,53 @@
     color: #2D232E;
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   }
+}
+
+/* Accessibility & Dynamic Text Scaling */
+html[data-text-scale="standard"] {
+  font-size: 16px;
+}
+
+html[data-text-scale="comfortable"] {
+  font-size: 18px;
+}
+
+html[data-text-scale="large"] {
+  font-size: 20px;
+}
+
+html[data-text-scale="xlarge"] {
+  font-size: 22px;
+}
+
+/* Elevate micro-text utility classes so small labels remain comfortably legible on all mobile displays */
+.text-\[8px\],
+.text-\[9px\],
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.8125rem !important;
+  line-height: 1.35 !important;
+}
+
+html[data-text-scale="standard"] .text-\[8px\],
+html[data-text-scale="standard"] .text-\[9px\],
+html[data-text-scale="standard"] .text-\[10px\],
+html[data-text-scale="standard"] .text-\[11px\] {
+  font-size: 0.75rem !important;
+}
+
+html[data-text-scale="large"] .text-\[8px\],
+html[data-text-scale="large"] .text-\[9px\],
+html[data-text-scale="large"] .text-\[10px\],
+html[data-text-scale="large"] .text-\[11px\] {
+  font-size: 0.875rem !important;
+}
+
+html[data-text-scale="xlarge"] .text-\[8px\],
+html[data-text-scale="xlarge"] .text-\[9px\],
+html[data-text-scale="xlarge"] .text-\[10px\],
+html[data-text-scale="xlarge"] .text-\[11px\] {
+  font-size: 0.9375rem !important;
 }
 
 /* Custom Scrollbars */

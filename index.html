@@ -2,10 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
   <title>CycleCare — Mindful Women's Health & Cycle Companion</title>
   <meta name="description" content="Modern, private women's health and period-tracking app designed with soft aesthetics, holistic hormone insights, and on-device security.">
   <meta name="theme-color" content="#FFF5F7">
+
+  <!-- Immediate Font Scaling Restoration (Prevents FOUC) -->
+  <script>
+    (function() {
+      try {
+        var s = localStorage.getItem('cyclecare_text_scale') || 'comfortable';
+        document.documentElement.setAttribute('data-text-scale', s);
+      } catch (e) {}
+    })();
+  </script>
 
   <!-- PWA & Mobile Web App Capabilities -->
   <link rel="manifest" href="/manifest.json">
@@ -62,7 +72,7 @@
   <script src="/env.js"></script>
 
   <!-- CycleCare Master Script -->
-  <script src="cyclecare.js?v=1.1.0"></script>
+  <script src="cyclecare.js?v=1.1.1"></script>
 
   <!-- Service Worker Registration -->
   <script>

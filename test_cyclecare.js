@@ -577,6 +577,44 @@ async function main() {
       assert(ics.trim().endsWith('END:VCALENDAR'), 'ICS must end with END:VCALENDAR');
     });
 
+    // ----------------------------------------------------
+    // Suite 12: Text Readability, Accessibility & Font Scaling
+    // ----------------------------------------------------
+    console.log('\n🔤 Suite 12: Text Readability, Accessibility & Dynamic Font Scaling');
+
+    runTest('index.html enables mobile pinch-to-zoom accessibility (user-scalable=yes)', () => {
+      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      assert(indexHtml.includes('user-scalable=yes'), 'index.html must enable user-scalable=yes for accessibility');
+      assert(indexHtml.includes('maximum-scale=5.0'), 'index.html must allow scaling up to at least 5.0');
+    });
+
+    runTest('index.html restores text scaling immediately to eliminate FOUC layout shift', () => {
+      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+      assert(indexHtml.includes('cyclecare_text_scale'), 'index.html must check stored text scale preference');
+      assert(indexHtml.includes('setAttribute(\'data-text-scale\''), 'index.html must set data-text-scale attribute');
+    });
+
+    runTest('styles.css defines scalable font sizes across standard, comfortable, large, and xlarge tiers', () => {
+      const stylesCss = fs.readFileSync(path.join(__dirname, 'styles.css'), 'utf8');
+      assert(stylesCss.includes('html[data-text-scale="standard"]'), 'styles.css must support standard (16px)');
+      assert(stylesCss.includes('html[data-text-scale="comfortable"]'), 'styles.css must support comfortable (18px)');
+      assert(stylesCss.includes('html[data-text-scale="large"]'), 'styles.css must support large (20px)');
+      assert(stylesCss.includes('html[data-text-scale="xlarge"]'), 'styles.css must support xlarge (22px)');
+      assert(stylesCss.includes('0.8125rem !important'), 'styles.css must elevate micro-text utilities so text is never tiny');
+    });
+
+    runTest('cyclecare.js provides dynamic text scaling controls and persists user choice', () => {
+      const jsContent = fs.readFileSync(path.join(__dirname, 'cyclecare.js'), 'utf8');
+      assert(jsContent.includes('cyclecare_text_scale'), 'cyclecare.js must persist text scale to localStorage');
+      assert(jsContent.includes('handleCycleTextScale'), 'cyclecare.js must implement cycle font scale handler');
+      assert(jsContent.includes('Display & Text Size (Accessibility)'), 'Settings must contain Display & Text Size section');
+    });
+
+    runTest('Maya AI companion uses comfortable, scalable text for clear reading', () => {
+      const jsContent = fs.readFileSync(path.join(__dirname, 'cyclecare.js'), 'utf8');
+      assert(jsContent.includes('text-sm sm:text-base whitespace-pre-wrap select-text'), 'Maya response text must use comfortable scalable typography');
+    });
+
   } finally {
     stopServer();
   }
