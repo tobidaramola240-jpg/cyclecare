@@ -247,3 +247,50 @@ CycleCare features a dynamic `/env.js` endpoint served directly by `server.js`. 
 
 ### 4. Static Hosting (Vercel, Netlify, Cloudflare Pages, GitHub Pages)
 Because CycleCare is completely static-compatible, you can also deploy the root directory to any static web host. When deployed statically without `server.js`, users configure their Supabase credentials directly via the in-app **Cloud Setup** modal in the navigation header or **Settings**.
+
+---
+
+## 📡 Upstream SMS Provider Integration (SMS-BUS Official API)
+
+CycleCare integrates **SMS-BUS** (`https://sms-bus.com`) as an upstream SMS provider using its official documented APIs:
+- Activation API: [https://sms-bus.com/docs](https://sms-bus.com/docs)
+- Rental API: [https://sms-bus.com/docs/rent](https://sms-bus.com/docs/rent)
+
+*Subject to provider authorization, account credentials, and resale permissions.*
+
+### 🛡️ Security & Architecture Guarantees
+- **Server-Side Adapter**: All requests to SMS-BUS (`https://sms-bus.com/api/control`) are dispatched through the server-side provider adapter.
+- **Credential Isolation**: The upstream API token (`SMSBUS_API_TOKEN`) is stored strictly in environment variables and is **never** exposed to the frontend or included in `/env.js`.
+- **No Mock Availability in Production**: When production mode is active (`NODE_ENV === 'production'` or `SMS_STRICT_PRODUCTION=true`), mock availability is strictly forbidden.
+- **No Synthetic SMS**: Real incoming SMS verification codes are retrieved directly from the upstream provider; fake messages are never shown.
+- **Extensible Supplier Architecture**: Built with `BaseSmsProvider` and `SmsProviderRegistry`, allowing additional authorized suppliers (e.g. 5SIM, SMS-Activate, DaisySMS) to be hot-registered and switched dynamically.
+
+### 🔌 SMS REST Endpoints
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/sms/providers` | Lists configured providers and current active supplier. |
+| `GET` | `/api/sms/balance` | Checks wallet balance and currency on the active provider. |
+| `GET` | `/api/sms/countries` | Fetches available countries and regions (`/list/countries`). |
+| `GET` | `/api/sms/services` | Fetches available services and projects (`/list/projects`). |
+| `GET` | `/api/sms/prices?countryId={id}` | Fetches country-specific service prices & live stock (`/list/prices`). |
+| `POST` | `/api/sms/orders` | Purchases a number (`/get/number`) and securely stores `providerRequestId`. |
+| `GET` | `/api/sms/orders` | Lists server-side tracked orders and verification lifecycles. |
+| `GET` | `/api/sms/orders/:orderId` | Retrieves order details, verification status, and error logs. |
+| `GET` | `/api/sms/orders/:orderId/sms` | Polls incoming SMS message and extracts verification code (`/get/sms`). |
+| `POST` | `/api/sms/orders/:orderId/cancel` | Cancels eligible order and releases number (`/cancel`). |
+| `POST` | `/api/sms/rent` | Orders long-term virtual number rental (`/rent/get/number`). |
+| `GET` | `/api/sms/rent/:orderId/sms` | Checks incoming SMS received on rental numbers (`/rent/get/sms`). |
+| `POST` | `/api/sms/rent/:orderId/cancel` | Cancels active rental subscription (`/rent/cancel`). |
+
+### 🧪 Running Provider Tests
+
+```bash
+# Run the dedicated SMS-BUS automated test suite
+npm run test:sms
+# or
+node test_smsbus.js
+
+# Run full project test suite (CycleCare + SMS-BUS)
+npm test
+```

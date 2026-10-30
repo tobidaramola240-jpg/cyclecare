@@ -6,6 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { handleSmsApiRoute } = require('./sms/smsHttpHandler');
 
 // Load .env if present
 const envPath = path.join(__dirname, '.env');
@@ -44,7 +45,9 @@ const MIME_TYPES = {
 
 const server = http.createServer((req, res) => {
   // Normalize URL
-  const parsedUrl = req.url.split('?')[0];
+  const fullUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const parsedUrl = fullUrl.pathname;
+  const searchParams = fullUrl.searchParams;
 
   // 1. Health check route for cloud deployment orchestrators
   if (parsedUrl === '/api/health') {
@@ -68,7 +71,13 @@ const server = http.createServer((req, res) => {
     return res.end(envJs);
   }
 
-  // 3. Generative AI Chat endpoint (Google Gemini 1.5 Flash)
+  // 3. Upstream SMS Provider Integration (SMS-BUS official API & extensible suppliers)
+  if (parsedUrl.startsWith('/api/sms')) {
+    handleSmsApiRoute(req, res, parsedUrl, searchParams);
+    return;
+  }
+
+  // 4. Generative AI Chat endpoint (Google Gemini 1.5 Flash)
   if (req.method === 'POST' && parsedUrl === '/api/chat') {
     let body = '';
     req.on('data', chunk => {
@@ -218,6 +227,7 @@ if (require.main === module) {
     console.log(`🌸 CycleCare server running on http://localhost:${PORT}`);
     console.log(`   Health check: http://localhost:${PORT}/api/health`);
     console.log(`   Environment runtime: http://localhost:${PORT}/env.js`);
+    console.log(`   SMS Provider API: http://localhost:${PORT}/api/sms/providers`);
   });
 }
 

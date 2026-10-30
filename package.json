@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "serve": "node server.js",
-    "test": "node test_cyclecare.js"
+    "test": "node test_cyclecare.js && node test_smsbus.js",
+    "test:sms": "node test_smsbus.js"
   },
   "keywords": [
     "cyclecare",
