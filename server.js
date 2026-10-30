@@ -52,7 +52,12 @@ const server = http.createServer((req, res) => {
   // 1. Health check route for cloud deployment orchestrators
   if (parsedUrl === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ status: 'ok', app: 'CycleCare', timestamp: new Date().toISOString() }));
+    return res.end(JSON.stringify({
+      status: 'ok',
+      app: 'CycleCare',
+      apps: ['CycleCare', 'SmsBusGateway'],
+      timestamp: new Date().toISOString()
+    }));
   }
 
   // 2. Dynamic environment variable injection for frontend
@@ -187,7 +192,17 @@ Guidelines:
     return;
   }
 
-  let localPath = parsedUrl === '/' ? '/index.html' : (parsedUrl === '/login' || parsedUrl === '/login-demo' ? '/login-demo.html' : parsedUrl);
+  let localPath;
+  if (parsedUrl === '/') {
+    localPath = '/index.html';
+  } else if (parsedUrl === '/login' || parsedUrl === '/login-demo') {
+    localPath = '/login-demo.html';
+  } else if (parsedUrl === '/sms' || parsedUrl === '/sms/' || parsedUrl === '/sms-app') {
+    localPath = '/sms.html';
+  } else {
+    localPath = parsedUrl;
+  }
+
   let filePath = path.join(__dirname, localPath);
 
   // Security check: ensure path is within directory
@@ -198,8 +213,12 @@ Guidelines:
 
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
-      // Fallback to index.html for SPA client-side routing
-      filePath = path.join(__dirname, 'index.html');
+      // Fallback for SPA client-side routing
+      if (parsedUrl.startsWith('/sms')) {
+        filePath = path.join(__dirname, 'sms.html');
+      } else {
+        filePath = path.join(__dirname, 'index.html');
+      }
     }
 
     const ext = path.extname(filePath).toLowerCase();
@@ -225,9 +244,10 @@ Guidelines:
 if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`🌸 CycleCare server running on http://localhost:${PORT}`);
+    console.log(`⚡ SMS-BUS Gateway App: http://localhost:${PORT}/sms`);
+    console.log(`   SMS Provider API: http://localhost:${PORT}/api/sms/providers`);
     console.log(`   Health check: http://localhost:${PORT}/api/health`);
     console.log(`   Environment runtime: http://localhost:${PORT}/env.js`);
-    console.log(`   SMS Provider API: http://localhost:${PORT}/api/sms/providers`);
   });
 }
 
