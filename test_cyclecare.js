@@ -615,6 +615,65 @@ async function main() {
       assert(jsContent.includes('text-sm sm:text-base whitespace-pre-wrap select-text'), 'Maya response text must use comfortable scalable typography');
     });
 
+    // ----------------------------------------------------
+    // Suite 13: Live SMS Reception Modal & Active Reservation Display
+    // ----------------------------------------------------
+    console.log('\n📱 Suite 13: Live SMS Reception Modal & Active Reservation Display');
+
+    const { getOrCreateCustomerId, SmsReceptionModalView } = require('./cyclecare');
+
+    runTest('getOrCreateCustomerId isolates authenticated users and generates customer tenant ID', () => {
+      assert.strictEqual(typeof getOrCreateCustomerId, 'function');
+      const authUser = { id: 'usr_auth_789', email: 'jane@example.com' };
+      assert.strictEqual(getOrCreateCustomerId(authUser), 'usr_auth_789');
+
+      const guestId = getOrCreateCustomerId(null);
+      assert(guestId.startsWith('cust_'), 'Guest customer ID must start with cust_');
+    });
+
+    runTest('SmsReceptionModalView component is defined and exported', () => {
+      assert.strictEqual(typeof SmsReceptionModalView, 'function');
+    });
+
+    runTest('cyclecare.js renders all 7 required display elements for live SMS reception', () => {
+      const jsContent = fs.readFileSync(path.join(__dirname, 'cyclecare.js'), 'utf8');
+
+      // 1. Purchased phone number
+      assert(jsContent.includes('Purchased Phone Number') && jsContent.includes('activeOrder.number'), 'Must display purchased phone number');
+
+      // 2. Selected country and service
+      assert(jsContent.includes('countryName') && jsContent.includes('serviceName'), 'Must display selected country and service');
+
+      // 3. Order reference
+      assert(jsContent.includes('activeOrder.id') && jsContent.includes('Ref:'), 'Must display order reference ID');
+
+      // 4. Waiting for SMS status
+      assert(jsContent.includes('Waiting for SMS') && jsContent.includes('Live polling active'), 'Must display waiting for SMS status');
+
+      // 5. Received message
+      assert(jsContent.includes('Received Message') && jsContent.includes('Verification Code / OTP'), 'Must display received message and code');
+
+      // 6. Received time
+      assert(jsContent.includes('formatTimestamp(latestMsg.receivedAt)'), 'Must display received time');
+
+      // 7. Copy message button
+      assert(jsContent.includes('Copy Code') && jsContent.includes('Copy Full Message'), 'Must provide 1-click copy buttons');
+    });
+
+    runTest('Controlled polling interval (3.5s) stops on completion, expiry, or cancellation', () => {
+      const jsContent = fs.readFileSync(path.join(__dirname, 'cyclecare.js'), 'utf8');
+      assert(jsContent.includes('3500'), 'Must poll at controlled 3500ms interval');
+      assert(jsContent.includes('status === \'RECEIVED\''), 'Must stop polling when SMS is received');
+      assert(jsContent.includes('status === \'CANCELLED\''), 'Must stop polling when order is cancelled');
+      assert(jsContent.includes('status === \'EXPIRED\''), 'Must stop polling when order is expired');
+    });
+
+    runTest('Customer tenant isolation and resilient provider error handling are enforced in client requests', () => {
+      const jsContent = fs.readFileSync(path.join(__dirname, 'cyclecare.js'), 'utf8');
+      assert(jsContent.includes('\'x-customer-id\': customerId'), 'Every SMS API call must send customer isolation header');
+      assert(jsContent.includes('setPollError'), 'Provider timeouts and drops must be handled gracefully');
+    });
+
   } finally {
     stopServer();
   }

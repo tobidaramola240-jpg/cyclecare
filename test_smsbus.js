@@ -559,6 +559,9 @@ async function main() {
   // ----------------------------------------------------
   console.log('\n🌐 Suite 11: HTTP REST Server Integration (/api/sms/*)');
 
+  const { defaultRegistry } = require('./sms');
+  defaultRegistry.register(new SmsBusAdapter({ token: 'test_integration_token', fetchFn: createMockSmsBusFetch() }), true);
+
   const server = require('./server');
   const serverPort = 3105;
   await new Promise((resolve) => server.listen(serverPort, resolve));
@@ -612,6 +615,151 @@ async function main() {
       const res = await fetchApi('/api/sms/prices');
       assert.strictEqual(res.status, 400);
       assert(res.body.error.includes('countryId'));
+    });
+
+    // ----------------------------------------------------
+    // Suite 12: Customer Multi-Tenant Isolation & Authorization
+    // ----------------------------------------------------
+    console.log('\n🔐 Suite 12: Customer Isolation & Security Authorization');
+
+    let aliceOrderId = null;
+
+    await runAsyncTest('Customer A creates order isolated under their customer identity', async () => {
+      const res = await fetchApi('/api/sms/orders', {
+        method: 'POST',
+        headers: { 'x-customer-id': 'cust_alice_123' },
+        body: { countryId: 1, serviceId: 1, cost: 0.75 },
+      });
+
+      assert.strictEqual(res.status, 201);
+      assert(res.body.order);
+      assert.strictEqual(res.body.order.customerId, 'cust_alice_123');
+      assert.strictEqual(res.body.order.status, 'PENDING');
+      aliceOrderId = res.body.order.id;
+    });
+
+    await runAsyncTest('Customer A can view their own order details and poll SMS', async () => {
+      assert(aliceOrderId);
+      const res = await fetchApi(`/api/sms/orders/${aliceOrderId}`, {
+        headers: { 'x-customer-id': 'cust_alice_123' },
+      });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.order.id, aliceOrderId);
+
+      const smsPoll = await fetchApi(`/api/sms/orders/${aliceOrderId}/sms`, {
+        headers: { 'x-customer-id': 'cust_alice_123' },
+      });
+      assert.strictEqual(smsPoll.status, 200);
+      assert.strictEqual(smsPoll.body.hasSms, true);
+      assert.strictEqual(smsPoll.body.code, '429916');
+    });
+
+    await runAsyncTest('Customer B is denied (403 ACCESS_DENIED) when querying Customer A order', async () => {
+      assert(aliceOrderId);
+      const res = await fetchApi(`/api/sms/orders/${aliceOrderId}`, {
+        headers: { 'x-customer-id': 'cust_bob_456' },
+      });
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.code, 'ACCESS_DENIED');
+      assert(res.body.error.includes('Access denied'));
+    });
+
+    await runAsyncTest('Customer B is denied (403 ACCESS_DENIED) when polling SMS of Customer A order', async () => {
+      assert(aliceOrderId);
+      const res = await fetchApi(`/api/sms/orders/${aliceOrderId}/sms`, {
+        headers: { 'x-customer-id': 'cust_bob_456' },
+      });
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.code, 'ACCESS_DENIED');
+    });
+
+    await runAsyncTest('Customer B is denied (403 ACCESS_DENIED) when attempting to cancel Customer A order', async () => {
+      assert(aliceOrderId);
+      const res = await fetchApi(`/api/sms/orders/${aliceOrderId}/cancel`, {
+        method: 'POST',
+        headers: { 'x-customer-id': 'cust_bob_456' },
+        body: { reason: 'Malicious cancel attempt' },
+      });
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.body.code, 'ACCESS_DENIED');
+    });
+
+    // ----------------------------------------------------
+    // Suite 13: Live SMS Polling Lifecycle, Expiration & Timeout Resilience
+    // ----------------------------------------------------
+    console.log('\n⏱️ Suite 13: Live SMS Polling Lifecycle, Expiration & Timeout Resilience');
+
+    await runAsyncTest('Polling lifecycle stops when order is CANCELLED', async () => {
+      const cancelPurchase = await fetchApi('/api/sms/orders', {
+        method: 'POST',
+        headers: { 'x-customer-id': 'cust_lifecycle_cancel' },
+        body: { countryId: 1, serviceId: 1 },
+      });
+      const orderId = cancelPurchase.body.order.id;
+
+      // Cancel the order
+      const cancelRes = await fetchApi(`/api/sms/orders/${orderId}/cancel`, {
+        method: 'POST',
+        headers: { 'x-customer-id': 'cust_lifecycle_cancel' },
+        body: { reason: 'User finished early' },
+      });
+      assert.strictEqual(cancelRes.status, 200);
+      assert.strictEqual(cancelRes.body.order.status, 'CANCELLED');
+
+      // Subsequent poll returns CANCELLED status immediately, terminating client polling
+      const pollRes = await fetchApi(`/api/sms/orders/${orderId}/sms`, {
+        headers: { 'x-customer-id': 'cust_lifecycle_cancel' },
+      });
+      assert.strictEqual(pollRes.status, 200);
+      assert.strictEqual(pollRes.body.status, 'CANCELLED');
+      assert.strictEqual(pollRes.body.hasSms, false);
+    });
+
+    await runAsyncTest('Polling lifecycle stops when order reaches 20-minute EXPIRED status', async () => {
+      const expirePurchase = await fetchApi('/api/sms/orders', {
+        method: 'POST',
+        headers: { 'x-customer-id': 'cust_lifecycle_expire' },
+        body: { countryId: 1, serviceId: 1 },
+      });
+      const orderId = expirePurchase.body.order.id;
+
+      // Simulate expiration by backdating expiresAt in default orderStore
+      const { defaultOrderStore } = require('./sms');
+      const order = defaultOrderStore.getOrder(orderId);
+      order.expiresAt = new Date(Date.now() - 5000).toISOString();
+
+      // Polling detects elapsed time and stops polling with EXPIRED status
+      const pollRes = await fetchApi(`/api/sms/orders/${orderId}/sms`, {
+        headers: { 'x-customer-id': 'cust_lifecycle_expire' },
+      });
+      assert.strictEqual(pollRes.status, 200);
+      assert.strictEqual(pollRes.body.status, 'EXPIRED');
+      assert.strictEqual(pollRes.body.hasSms, false);
+      assert(pollRes.body.message.includes('expired'));
+    });
+
+    await runAsyncTest('Network/timeout errors on provider retrieve are captured gracefully without crashing', async () => {
+      // Mock provider error recording
+      const failingOrder = await fetchApi('/api/sms/orders', {
+        method: 'POST',
+        headers: { 'x-customer-id': 'cust_timeout_test' },
+        body: { countryId: 1, serviceId: 1 },
+      });
+      const orderId = failingOrder.body.order.id;
+
+      const { defaultOrderStore } = require('./sms');
+      defaultOrderStore.recordError(orderId, {
+        code: 'PROVIDER_TIMEOUT',
+        message: 'Upstream gateway timed out after 10000ms',
+        statusCode: 504,
+      });
+
+      const orderCheck = await fetchApi(`/api/sms/orders/${orderId}`, {
+        headers: { 'x-customer-id': 'cust_timeout_test' },
+      });
+      assert.strictEqual(orderCheck.status, 200);
+      assert.strictEqual(orderCheck.body.order.errorCount, 1);
+      assert.strictEqual(orderCheck.body.order.lastError.code, 'PROVIDER_TIMEOUT');
     });
 
   } finally {

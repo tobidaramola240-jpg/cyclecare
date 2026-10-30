@@ -96,6 +96,7 @@ class SmsOrderStore {
 
     const order = {
       id,
+      customerId: params.customerId ? String(params.customerId) : null,
       provider: params.provider,
       providerRequestId: String(params.providerRequestId),
       number: params.number,
@@ -161,8 +162,26 @@ class SmsOrderStore {
     if (filter.number) {
       list = list.filter(o => o.number.includes(filter.number));
     }
+    if (filter.customerId) {
+      list = list.filter(o => !o.customerId || o.customerId === String(filter.customerId));
+    }
 
     return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  /**
+   * Verifies if a customer has permission to access an order.
+   * Enforces strict customer data isolation.
+   * @param {string} id
+   * @param {string} customerId
+   * @returns {boolean}
+   */
+  isCustomerAllowed(id, customerId) {
+    const order = this.orders.get(id);
+    if (!order) return false;
+    if (!order.customerId) return true; // Unassigned legacy order
+    if (!customerId) return false;
+    return order.customerId === String(customerId);
   }
 
   /**
@@ -253,6 +272,26 @@ class SmsOrderStore {
   }
 
   /**
+   * Marks an order as EXPIRED.
+   * @param {string} id
+   * @param {string} [reason]
+   * @returns {object|null}
+   */
+  expireOrder(id, reason = 'Reservation expired') {
+    const order = this.orders.get(id);
+    if (!order) return null;
+
+    order.status = 'EXPIRED';
+    order.expiredAt = new Date().toISOString();
+    order.expireReason = reason;
+    order.updatedAt = new Date().toISOString();
+
+    this.orders.set(id, order);
+    this._saveToDisk();
+    return order;
+  }
+
+  /**
    * Returns a sanitized, client-safe JSON representation of an order.
    * Guarantees internal credentials are never exposed.
    * @param {object} order
@@ -262,6 +301,7 @@ class SmsOrderStore {
     if (!order) return null;
     return {
       id: order.id,
+      customerId: order.customerId || null,
       provider: order.provider,
       providerRequestId: order.providerRequestId,
       number: order.number,

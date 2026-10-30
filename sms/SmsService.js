@@ -69,6 +69,7 @@ class SmsService {
    * Purchases a number and securely stores the provider request ID.
    *
    * @param {object} params
+   * @param {string} [params.customerId] - Customer identifier for tenancy isolation
    * @param {number|string} params.countryId
    * @param {number|string} params.serviceId
    * @param {boolean} [params.reuse=false]
@@ -76,7 +77,7 @@ class SmsService {
    * @param {number} [params.expectedCost=0]
    * @param {object} [params.metadata={}]
    */
-  async purchaseNumber({ countryId, serviceId, reuse = false, providerId = null, expectedCost = 0, metadata = {} }) {
+  async purchaseNumber({ customerId = null, countryId, serviceId, reuse = false, providerId = null, expectedCost = 0, metadata = {} }) {
     const provider = this.registry.getProvider(providerId);
 
     let res;
@@ -87,8 +88,9 @@ class SmsService {
       throw err;
     }
 
-    // Securely persist provider request ID and metadata
+    // Securely persist provider request ID, customer ID and metadata
     const order = this.orderStore.createOrder({
+      customerId,
       provider: provider.id,
       providerRequestId: res.providerRequestId,
       number: res.number,
@@ -111,13 +113,20 @@ class SmsService {
   /**
    * Checks for incoming SMS on an active order.
    * Strictly avoids generating or showing fake SMS.
+   * Enforces customer authorization.
    *
    * @param {string} orderId
+   * @param {string} [customerId] - Customer identifier
    */
-  async checkIncomingSms(orderId) {
+  async checkIncomingSms(orderId, customerId = null) {
     const order = this.orderStore.getOrder(orderId);
     if (!order) {
       throw new SmsProviderError(`Order '${orderId}' not found.`, 'ORDER_NOT_FOUND', 404);
+    }
+
+    // Enforce customer tenancy: cannot view or poll another customer's SMS
+    if (customerId && !this.orderStore.isCustomerAllowed(orderId, customerId)) {
+      throw new SmsProviderError('Access denied: You can only access your own orders and messages.', 'ACCESS_DENIED', 403);
     }
 
     // If order was already cancelled, cannot poll SMS
@@ -126,6 +135,30 @@ class SmsService {
         hasSms: false,
         status: 'CANCELLED',
         message: 'Order was cancelled.',
+        order: this.orderStore.toClientJson(order),
+      };
+    }
+
+    // Check if reservation expired (status is EXPIRED or 20-min window elapsed)
+    const isExpired = order.status === 'EXPIRED' || (order.expiresAt && new Date(order.expiresAt).getTime() <= Date.now());
+    if (isExpired) {
+      const expired = order.status === 'EXPIRED' ? order : this.orderStore.expireOrder(orderId, 'Reservation expired after 20 minutes.');
+      return {
+        hasSms: false,
+        status: 'EXPIRED',
+        message: 'Order reservation has expired.',
+        order: this.orderStore.toClientJson(expired),
+      };
+    }
+
+    // If already received, return stored message directly without polling upstream again
+    if (order.status === 'RECEIVED') {
+      return {
+        hasSms: true,
+        code: order.smsCode,
+        text: order.smsText,
+        status: 'RECEIVED',
+        message: 'SMS already received.',
         order: this.orderStore.toClientJson(order),
       };
     }
@@ -166,14 +199,20 @@ class SmsService {
 
   /**
    * Cancels an eligible active order with the upstream provider.
+   * Enforces customer authorization.
    *
    * @param {string} orderId
    * @param {string} [reason='User requested cancellation']
+   * @param {string} [customerId]
    */
-  async cancelOrder(orderId, reason = 'User requested cancellation') {
+  async cancelOrder(orderId, reason = 'User requested cancellation', customerId = null) {
     const order = this.orderStore.getOrder(orderId);
     if (!order) {
       throw new SmsProviderError(`Order '${orderId}' not found.`, 'ORDER_NOT_FOUND', 404);
+    }
+
+    if (customerId && !this.orderStore.isCustomerAllowed(orderId, customerId)) {
+      throw new SmsProviderError('Access denied: You can only cancel your own orders.', 'ACCESS_DENIED', 403);
     }
 
     if (order.status === 'CANCELLED') {
@@ -206,20 +245,32 @@ class SmsService {
 
   /**
    * Retrieves specific order by internal ID.
+   * Enforces customer authorization.
+   * @param {string} orderId
+   * @param {string} [customerId]
    */
-  getOrder(orderId) {
+  getOrder(orderId, customerId = null) {
     const order = this.orderStore.getOrder(orderId);
     if (!order) {
       throw new SmsProviderError(`Order '${orderId}' not found.`, 'ORDER_NOT_FOUND', 404);
+    }
+    if (customerId && !this.orderStore.isCustomerAllowed(orderId, customerId)) {
+      throw new SmsProviderError('Access denied: You can only access your own orders.', 'ACCESS_DENIED', 403);
     }
     return this.orderStore.toClientJson(order);
   }
 
   /**
-   * Lists orders with filters.
+   * Lists orders with filters scoped to customer.
+   * @param {object} [filter={}]
+   * @param {string} [customerId]
    */
-  listOrders(filter = {}) {
-    const orders = this.orderStore.listOrders(filter);
+  listOrders(filter = {}, customerId = null) {
+    const scopedFilter = { ...filter };
+    if (customerId) {
+      scopedFilter.customerId = customerId;
+    }
+    const orders = this.orderStore.listOrders(scopedFilter);
     return orders.map(o => this.orderStore.toClientJson(o));
   }
 
@@ -230,12 +281,13 @@ class SmsService {
   /**
    * Purchases a long-term rental number.
    */
-  async rentNumber({ countryId, days = 30, serviceId = null, providerId = null, expectedCost = 0, metadata = {} }) {
+  async rentNumber({ customerId = null, countryId, days = 30, serviceId = null, providerId = null, expectedCost = 0, metadata = {} }) {
     const provider = this.registry.getProvider(providerId);
 
     const res = await provider.rentNumber({ countryId, days, serviceId });
 
     const order = this.orderStore.createOrder({
+      customerId,
       provider: provider.id,
       providerRequestId: res.providerRequestId,
       number: res.number,
@@ -258,11 +310,38 @@ class SmsService {
 
   /**
    * Checks incoming messages on a rental order.
+   * Enforces customer authorization.
+   * @param {string} orderId
+   * @param {string} [customerId]
    */
-  async checkRentalSms(orderId) {
+  async checkRentalSms(orderId, customerId = null) {
     const order = this.orderStore.getOrder(orderId);
     if (!order) {
       throw new SmsProviderError(`Order '${orderId}' not found.`, 'ORDER_NOT_FOUND', 404);
+    }
+
+    if (customerId && !this.orderStore.isCustomerAllowed(orderId, customerId)) {
+      throw new SmsProviderError('Access denied: You can only access your own orders and messages.', 'ACCESS_DENIED', 403);
+    }
+
+    if (order.status === 'CANCELLED') {
+      return {
+        hasSms: false,
+        status: 'CANCELLED',
+        message: 'Rental order was cancelled.',
+        order: this.orderStore.toClientJson(order),
+      };
+    }
+
+    const isExpired = order.status === 'EXPIRED' || (order.expiresAt && new Date(order.expiresAt).getTime() <= Date.now());
+    if (isExpired) {
+      const expired = order.status === 'EXPIRED' ? order : this.orderStore.expireOrder(orderId, 'Rental expired.');
+      return {
+        hasSms: false,
+        status: 'EXPIRED',
+        message: 'Rental order has expired.',
+        order: this.orderStore.toClientJson(expired),
+      };
     }
 
     const provider = this.registry.getProvider(order.provider);
