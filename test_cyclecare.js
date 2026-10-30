@@ -24,6 +24,7 @@ const {
   PREGNANCY_WEEKS_DATA,
   askMayaAi,
   generateCycleCalendarIcs,
+  isValidEmail,
 } = require('./cyclecare.js');
 
 const TEST_PORT = 3123;
@@ -162,6 +163,25 @@ async function main() {
       assert.strictEqual(res.statusCode, 200);
       assert(res.headers['content-type'].includes('text/html'));
       assert(res.body.includes('CycleCare'));
+    });
+
+    await runAsyncTest('POST /api/chat responds gracefully with fallback notice when no API key is provided', async () => {
+      const res = await new Promise((resolve, reject) => {
+        const req = http.request(`http://localhost:${TEST_PORT}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => { data += chunk; });
+          res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
+        });
+        req.on('error', reject);
+        req.write(JSON.stringify({ message: 'Hello' }));
+        req.end();
+      });
+      assert.strictEqual(res.statusCode, 200);
+      const json = JSON.parse(res.body);
+      assert.strictEqual(json.fallback, true);
     });
 
     // ----------------------------------------------------
@@ -380,6 +400,16 @@ async function main() {
       assert.strictEqual(checkEmpty.isValid, false);
       const checkNull = validateSupabaseKey(null);
       assert.strictEqual(checkNull.isValid, false);
+    });
+
+    runTest('Validates proper email address format and rejects random strings', () => {
+      assert.strictEqual(isValidEmail('tobi@gmail.com'), true);
+      assert.strictEqual(isValidEmail('maya.chen@cyclecare.app'), true);
+      assert.strictEqual(isValidEmail('random'), false);
+      assert.strictEqual(isValidEmail('fake@'), false);
+      assert.strictEqual(isValidEmail('user@domain'), false);
+      assert.strictEqual(isValidEmail(''), false);
+      assert.strictEqual(isValidEmail(null), false);
     });
 
     // ----------------------------------------------------

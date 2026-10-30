@@ -56,15 +56,113 @@ const server = http.createServer((req, res) => {
   if (parsedUrl === '/env.js') {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
     const supabaseAnon = process.env.VITE_SUPABASE_ANON_KEY || '';
+    const hasGemini = Boolean(process.env.GEMINI_API_KEY);
     const safeUrl = supabaseUrl.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const safeAnon = supabaseAnon.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const envJs = `window.__ENV__ = { VITE_SUPABASE_URL: "${safeUrl}", VITE_SUPABASE_ANON_KEY: "${safeAnon}" };\n`;
+    const envJs = `window.__ENV__ = { VITE_SUPABASE_URL: "${safeUrl}", VITE_SUPABASE_ANON_KEY: "${safeAnon}", GEMINI_CONFIGURED: ${hasGemini} };\n`;
 
     res.writeHead(200, {
       'Content-Type': 'application/javascript; charset=UTF-8',
       'Cache-Control': 'no-cache',
     });
     return res.end(envJs);
+  }
+
+  // 3. Generative AI Chat endpoint (Google Gemini 1.5 Flash)
+  if (req.method === 'POST' && parsedUrl === '/api/chat') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1e6) req.destroy(); // 1MB payload ceiling
+    });
+    req.on('end', async () => {
+      try {
+        const { message, cycleStatus, profile, conversationHistory, apiKey: clientApiKey } = JSON.parse(body || '{}');
+        const apiKey = clientApiKey || process.env.GEMINI_API_KEY || '';
+
+        if (!apiKey) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            hasApiKey: false,
+            fallback: true,
+            notice: 'No Gemini API key configured. Using on-device clinical knowledge base.'
+          }));
+        }
+
+        const currentDay = cycleStatus?.currentCycleDay || 1;
+        const phaseTitle = cycleStatus?.phaseTitle || 'Cycle';
+        const phaseDesc = cycleStatus?.phaseDescription || 'Natural hormonal rhythms';
+        const userName = profile?.isAnonymous ? 'Friend' : ((profile?.name || 'there').split(' ')[0]);
+
+        const systemInstruction = `You are Maya, a warm, compassionate, highly knowledgeable, and medically responsible women's health companion inside CycleCare.
+Current User Context:
+- User Name: ${userName}
+- Current Cycle Day: Day ${currentDay} (${phaseTitle} Phase)
+- Phase Biology: ${phaseDesc}
+
+Guidelines:
+1. Answer the user's specific question directly, warmly, and conversationally—just like ChatGPT, but tailored as an empathetic women's health companion.
+2. If the user asks casual or personal questions (e.g. "can you be honest with me", "who are you", "tell me a joke", "how are you feeling"), answer warmly and genuinely like a caring companion. Do NOT force cycle explanations unless relevant.
+3. For medical, reproductive, menstrual, or nutritional questions, provide clear evidence-based guidance based on ACOG, WHO, and endocrine standards.
+4. Maintain medical responsibility: clarify that you provide clinical wellness awareness, not formal medical diagnosis. If symptoms are severe, red-flag, or persistent, kindly suggest consulting a healthcare provider.
+5. Keep responses concise, warm, structured with bullet points where helpful.`;
+
+        const contents = [];
+        if (Array.isArray(conversationHistory)) {
+          conversationHistory.slice(-6).forEach(msg => {
+            if (msg.sender && msg.text) {
+              contents.push({
+                role: msg.sender === 'user' ? 'user' : 'model',
+                parts: [{ text: msg.text }]
+              });
+            }
+          });
+        }
+        contents.push({
+          role: 'user',
+          parts: [{ text: message }]
+        });
+
+        const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        const geminiRes = await fetch(geminiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemInstruction }] },
+            contents: contents,
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 900,
+            }
+          })
+        });
+
+        const data = await geminiRes.json();
+        if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+          const generatedText = data.candidates[0].content.parts[0].text;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            hasApiKey: true,
+            reply: generatedText,
+            sources: 'Maya AI · Powered by Google Gemini 1.5 Flash (Generative Intelligence)',
+            title: 'Maya AI Companion'
+          }));
+        } else {
+          console.warn('Gemini API response note:', data?.error?.message || 'No candidates returned');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({
+            hasApiKey: true,
+            fallback: true,
+            error: data?.error?.message || 'Could not generate response'
+          }));
+        }
+      } catch (e) {
+        console.error('Chat endpoint exception:', e.message);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ fallback: true, error: e.message }));
+      }
+    });
+    return;
   }
 
   let localPath = parsedUrl === '/' ? '/index.html' : (parsedUrl === '/login' || parsedUrl === '/login-demo' ? '/login-demo.html' : parsedUrl);

@@ -1697,6 +1697,33 @@
     }
   }
 
+  const KEY_VAULT_ACCOUNTS = 'cyclecare_vault_accounts';
+
+  function isValidEmail(email) {
+    if (!email || typeof email !== 'string') return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+  }
+
+  function getStoredVaultAccounts() {
+    try {
+      if (typeof localStorage === 'undefined') return {};
+      const raw = localStorage.getItem(KEY_VAULT_ACCOUNTS);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return {};
+  }
+
+  function saveStoredVaultAccount(acc) {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const all = getStoredVaultAccounts();
+      all[acc.email.toLowerCase().trim()] = acc;
+      localStorage.setItem(KEY_VAULT_ACCOUNTS, JSON.stringify(all));
+    } catch (e) {
+      console.warn('Could not persist vault account:', e);
+    }
+  }
+
   async function supabaseFetch(endpoint, options = {}, customToken) {
     const config = getSupabaseConfig();
     if (!config.isConfigured) {
@@ -5387,37 +5414,50 @@
       e.preventDefault();
       setErrorMsg(null);
       setSuccessMsg(null);
-      if (!email || !password) {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      if (!cleanEmail || !password) {
         setErrorMsg('Please enter both your email address and password.');
+        return;
+      }
+      if (!isValidEmail(cleanEmail)) {
+        setErrorMsg('Please enter a valid email address (e.g. name@example.com).');
         return;
       }
       const currentCfg = getSupabaseConfig();
       if (!currentCfg.isConfigured) {
-        // Seamless fallback when Supabase keys have not been configured yet
-        const cleanEmail = email.trim();
-        const cleanName = cleanEmail.split('@')[0];
+        // Real On-Device Vault Authentication
+        const accounts = getStoredVaultAccounts();
+        const account = accounts[cleanEmail];
+        if (!account) {
+          setErrorMsg('No account found with this email. Please click "Create Account" below to register first.');
+          return;
+        }
+        if (account.password !== password) {
+          setErrorMsg('Incorrect password. Please verify your password and try again.');
+          return;
+        }
         const localUser = {
-          id: 'user-' + Date.now(),
+          id: account.id || ('user-' + Date.now()),
           email: cleanEmail,
-          fullName: cleanName,
-          isAnonymous: false,
-          createdAt: new Date().toISOString(),
+          fullName: account.fullName || cleanEmail.split('@')[0],
+          isAnonymous: Boolean(account.isAnonymous),
+          createdAt: account.createdAt,
         };
         const session = {
-          accessToken: 'local-demo-token',
-          refreshToken: 'local-demo-refresh',
-          expiresAt: Date.now() + 3600 * 1000,
+          accessToken: 'local-vault-token-' + Date.now(),
+          refreshToken: 'local-vault-refresh',
+          expiresAt: Date.now() + 30 * 24 * 3600 * 1000,
           user: localUser,
         };
         saveStoredSession(session);
         onAuthSuccess(localUser);
-        setSuccessMsg(`Welcome, ${cleanName}! Signed in via Local On-Device Vault.`);
+        setSuccessMsg(`Welcome back, ${localUser.fullName}!`);
         setTimeout(onClose, 800);
         return;
       }
       setLoading(true);
       try {
-        const res = await supabaseSignIn({ email, password });
+        const res = await supabaseSignIn({ email: cleanEmail, password });
         onAuthSuccess(res.user);
         setSuccessMsg(`Welcome back, ${res.user.fullName || res.user.email}!`);
         setTimeout(onClose, 1000);
@@ -5432,8 +5472,13 @@
       e.preventDefault();
       setErrorMsg(null);
       setSuccessMsg(null);
-      if (!email || !password) {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      if (!cleanEmail || !password) {
         setErrorMsg('Please provide an email and a password.');
+        return;
+      }
+      if (!isValidEmail(cleanEmail)) {
+        setErrorMsg('Please enter a valid email address (e.g. name@example.com).');
         return;
       }
       if (password.length < 6) {
@@ -5442,24 +5487,30 @@
       }
       const currentCfg = getSupabaseConfig();
       if (!currentCfg.isConfigured) {
-        // Seamless fallback when Supabase keys have not been configured yet
-        const cleanEmail = email.trim();
+        // Real On-Device Vault Registration
+        const accounts = getStoredVaultAccounts();
+        if (accounts[cleanEmail]) {
+          setErrorMsg('An account with this email already exists. Please click "Sign In" to log in.');
+          return;
+        }
         const cleanName = isAnonymous ? 'CycleCare Friend' : (fullName.trim() || cleanEmail.split('@')[0]);
-        const localUser = {
+        const newAccount = {
           id: 'user-' + Date.now(),
           email: cleanEmail,
+          password: password,
           fullName: cleanName,
           isAnonymous: Boolean(isAnonymous),
           createdAt: new Date().toISOString(),
         };
+        saveStoredVaultAccount(newAccount);
         const session = {
-          accessToken: 'local-demo-token',
-          refreshToken: 'local-demo-refresh',
-          expiresAt: Date.now() + 3600 * 1000,
-          user: localUser,
+          accessToken: 'local-vault-token-' + Date.now(),
+          refreshToken: 'local-vault-refresh',
+          expiresAt: Date.now() + 30 * 24 * 3600 * 1000,
+          user: newAccount,
         };
         saveStoredSession(session);
-        onAuthSuccess(localUser);
+        onAuthSuccess(newAccount);
         setSuccessMsg(`Account created for ${cleanName}! Welcome to CycleCare.`);
         setTimeout(onClose, 800);
         return;
@@ -5467,7 +5518,7 @@
       setLoading(true);
       try {
         const res = await supabaseSignUp({
-          email,
+          email: cleanEmail,
           password,
           fullName: isAnonymous ? 'CycleCare Friend' : (fullName || 'CycleCare Friend'),
           isAnonymous,
@@ -5791,12 +5842,20 @@
         id: 'msg-init',
         sender: 'maya',
         title: `Welcome, ${userName} 🌸`,
-        text: `I am Maya, your private on-device cycle companion. You are currently on Day ${currentDay} (${phaseTitle} Phase). How can I assist you with your cycle, ovulation indicators, PMS management, nutrition, or reproductive wellness today?`,
+        text: `I am Maya, your private cycle companion. You are currently on Day ${currentDay} (${phaseTitle} Phase). How can I assist you with your cycle, ovulation indicators, PMS management, nutrition, or reproductive wellness today?`,
         sources: 'CycleCare Clinical Knowledge Base · ACOG & WHO Reference Library',
       }
     ]);
     const [inputQuery, setInputQuery] = useState('');
     const [isTyping, setIsTyping] = useState(false);
+    const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+    const [userGeminiKey, setUserGeminiKey] = useState(() => {
+      try { return localStorage.getItem('cyclecare_gemini_api_key') || ''; } catch (e) { return ''; }
+    });
+    const [tempKeyInput, setTempKeyInput] = useState('');
+    const hasServerGemini = Boolean(typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.GEMINI_CONFIGURED);
+    const isGeminiReady = Boolean(hasServerGemini || userGeminiKey);
+
     const messagesEndRef = (typeof useRef === 'function') ? useRef(null) : { current: null };
 
     useEffect(() => {
@@ -5823,30 +5882,78 @@
       setInputQuery('');
       setIsTyping(true);
 
-      setTimeout(() => {
-        try {
-          const answer = askMayaAi(q, cycleStatus || {}, profile || {});
-          const mayaMsg = {
-            id: `maya-${Date.now()}`,
-            sender: 'maya',
-            title: answer?.title || 'Cycle Guidance',
-            text: answer?.reply || 'Stay tuned to your natural cycle rhythms.',
-            sources: answer?.sources || 'CycleCare Clinical Guidelines',
-          };
-          setMessages(prev => [...prev, mayaMsg]);
-        } catch (err) {
-          console.error('Maya AI processing error:', err);
-          setMessages(prev => [...prev, {
-            id: `maya-${Date.now()}`,
-            sender: 'maya',
-            title: 'Cycle Awareness',
-            text: `Regarding "${q}": Hormonal rhythms across each phase influence energy and wellness. Prioritizing rest, hydration, and recording symptoms in your tracker helps build a clear personal cycle profile.`,
-            sources: 'ACOG Practice Guidelines',
-          }]);
-        } finally {
-          setIsTyping(false);
+      setTimeout(async () => {
+        let answer = null;
+
+        // 1. Try Live Generative AI (Gemini 1.5 Flash) if key is present or server-configured
+        if (isGeminiReady || userGeminiKey) {
+          try {
+            const apiRes = await fetch('/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: q,
+                cycleStatus: cycleStatus || {},
+                profile: profile || {},
+                conversationHistory: messages.slice(-6),
+                apiKey: userGeminiKey || '',
+              }),
+            });
+
+            if (apiRes.ok) {
+              const data = await apiRes.json();
+              if (data && data.reply && !data.fallback) {
+                answer = {
+                  title: data.title || 'Maya AI Companion',
+                  reply: data.reply,
+                  sources: data.sources || 'Maya AI · Powered by Google Gemini 1.5 Flash (Generative Intelligence)',
+                };
+              }
+            }
+          } catch (netErr) {
+            console.warn('Live Gemini request fallback to on-device:', netErr);
+          }
         }
+
+        // 2. Seamless fallback to on-device clinical knowledge base
+        if (!answer) {
+          try {
+            answer = askMayaAi(q, cycleStatus || {}, profile || {});
+          } catch (err) {
+            console.error('Maya AI processing error:', err);
+            answer = {
+              title: 'Cycle Awareness',
+              reply: `Regarding "${q}": Hormonal rhythms across each phase influence energy and wellness. Prioritizing rest, hydration, and recording symptoms in your tracker helps build a clear personal cycle profile.`,
+              sources: 'ACOG Practice Guidelines',
+            };
+          }
+        }
+
+        const mayaMsg = {
+          id: `maya-${Date.now()}`,
+          sender: 'maya',
+          title: answer?.title || 'Cycle Guidance',
+          text: answer?.reply || 'Stay tuned to your natural cycle rhythms.',
+          sources: answer?.sources || 'CycleCare Clinical Guidelines',
+        };
+        setMessages(prev => [...prev, mayaMsg]);
+        setIsTyping(false);
       }, 350);
+    };
+
+    const handleSaveGeminiKey = (e) => {
+      e.preventDefault();
+      const clean = (tempKeyInput || '').trim();
+      try {
+        if (clean) {
+          localStorage.setItem('cyclecare_gemini_api_key', clean);
+          setUserGeminiKey(clean);
+        } else {
+          localStorage.removeItem('cyclecare_gemini_api_key');
+          setUserGeminiKey('');
+        }
+      } catch (err) {}
+      setApiKeyModalOpen(false);
     };
 
     const suggestedPrompts = [
@@ -5861,7 +5968,7 @@
     if (!isOpen) return null;
 
     return h('div', { className: 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn' },
-      h('div', { className: 'bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-pink-100' },
+      h('div', { className: 'bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-pink-100 relative' },
         // Header
         h('div', { className: 'px-5 py-4 bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 text-white flex items-center justify-between shadow-sm' },
           h('div', { className: 'flex items-center gap-3' },
@@ -5869,9 +5976,18 @@
             h('div', null,
               h('div', { className: 'flex items-center gap-2' },
                 h('h3', { className: 'font-extrabold text-base tracking-tight' }, 'Maya AI Companion'),
-                h('span', { className: 'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-white/20 text-white border border-white/30' }, 'Private & On-Device')
+                h('button', {
+                  type: 'button',
+                  onClick: () => { setTempKeyInput(userGeminiKey); setApiKeyModalOpen(true); },
+                  className: `text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+                    isGeminiReady
+                      ? 'bg-emerald-500/30 text-emerald-100 border-emerald-300 shadow-xs'
+                      : 'bg-white/20 hover:bg-white/30 text-white border-white/30'
+                  }`,
+                  title: 'Configure Google Gemini API Key for ChatGPT-style open answers'
+                }, isGeminiReady ? '✨ Gemini AI Active' : '⚡ Enable Gemini AI')
               ),
-              h('p', { className: 'text-xs text-white/90' }, `Day ${currentDay} (${phaseTitle}) · Evidence-Based Awareness`)
+              h('p', { className: 'text-xs text-white/90' }, `Day ${currentDay} (${phaseTitle}) · ${isGeminiReady ? 'Live Generative AI' : 'On-Device Evidence Library'}`)
             )
           ),
           h('button', {
@@ -5879,6 +5995,57 @@
             onClick: onClose,
             className: 'w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white font-bold transition-colors'
           }, '✕')
+        ),
+
+        // API Key Setup Submodal
+        apiKeyModalOpen && h('div', { className: 'absolute inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn' },
+          h('div', { className: 'bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-pink-100 space-y-4' },
+            h('div', { className: 'flex items-center justify-between' },
+              h('div', { className: 'flex items-center gap-2' },
+                h('span', { className: 'text-2xl' }, '🤖'),
+                h('h4', { className: 'font-extrabold text-slate-800 text-sm' }, 'Unlock ChatGPT-Style AI with Gemini')
+              ),
+              h('button', { onClick: () => setApiKeyModalOpen(false), className: 'text-slate-400 hover:text-slate-600 font-bold' }, '✕')
+            ),
+            h('p', { className: 'text-xs text-slate-600 leading-relaxed' },
+              'By default, Maya answers from her on-device clinical health library. Connecting a free ',
+              h('strong', null, 'Google Gemini API key'),
+              ' unlocks open-ended, human-like generative conversations on any question you ask.'
+            ),
+            h('form', { onSubmit: handleSaveGeminiKey, className: 'space-y-3' },
+              h('div', null,
+                h('label', { className: 'block text-xs font-bold text-slate-700 mb-1' }, 'Gemini API Key'),
+                h('input', {
+                  type: 'password',
+                  value: tempKeyInput,
+                  onChange: (e) => setTempKeyInput(e.target.value),
+                  placeholder: 'AIzaSy...',
+                  className: 'w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-purple-400 focus:outline-none'
+                })
+              ),
+              h('div', { className: 'p-2.5 rounded-xl bg-purple-50 text-[11px] text-purple-900 space-y-1' },
+                h('div', { className: 'font-bold' }, '💡 How to get a free key (1 minute):'),
+                h('p', null, '1. Go to ', h('a', { href: 'https://aistudio.google.com/app/apikey', target: '_blank', rel: 'noopener noreferrer', className: 'text-purple-700 underline font-semibold' }, 'aistudio.google.com'), ' and click "Create API key".'),
+                h('p', null, '2. Paste it here, or set GEMINI_API_KEY on your Render/Vercel dashboard.')
+              ),
+              h('div', { className: 'flex gap-2 pt-1' },
+                h('button', {
+                  type: 'submit',
+                  className: 'flex-1 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold text-xs shadow-sm hover:opacity-95'
+                }, 'Save & Activate AI ✨'),
+                userGeminiKey && h('button', {
+                  type: 'button',
+                  onClick: () => {
+                    localStorage.removeItem('cyclecare_gemini_api_key');
+                    setUserGeminiKey('');
+                    setTempKeyInput('');
+                    setApiKeyModalOpen(false);
+                  },
+                  className: 'py-2 px-3 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-50'
+                }, 'Clear Key')
+              )
+            )
+          )
         ),
 
         // Quick Suggestion Chips
@@ -6192,6 +6359,9 @@
       PREGNANCY_WEEKS_DATA,
       askMayaAi,
       generateCycleCalendarIcs,
+      isValidEmail,
+      getStoredVaultAccounts,
+      saveStoredVaultAccount,
     };
   }
 })();
