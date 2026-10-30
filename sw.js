@@ -3,7 +3,7 @@
  * Provides offline caching, PWA installation, and push notification event handling.
  */
 
-const CACHE_NAME = 'cyclecare-v1.0.9';
+const CACHE_NAME = 'cyclecare-v1.1.0';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',

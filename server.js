@@ -123,8 +123,7 @@ Guidelines:
           parts: [{ text: message }]
         });
 
-        const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-        const geminiRes = await fetch(geminiEndpoint, {
+        let geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -137,14 +136,28 @@ Guidelines:
           })
         });
 
-        const data = await geminiRes.json();
+        let data = await geminiRes.json();
+        // Fallback to gemini-2.5-flash or gemini-1.5-flash if 3.5 not found
+        if (data.error && data.error.code === 404) {
+          geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              system_instruction: { parts: [{ text: systemInstruction }] },
+              contents: contents,
+              generationConfig: { temperature: 0.7, maxOutputTokens: 900 }
+            })
+          });
+          data = await geminiRes.json();
+        }
+
         if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
           const generatedText = data.candidates[0].content.parts[0].text;
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({
             hasApiKey: true,
             reply: generatedText,
-            sources: 'Maya AI · Powered by Google Gemini 1.5 Flash (Generative Intelligence)',
+            sources: 'Maya AI · Powered by Google Gemini Generative Intelligence',
             title: 'Maya AI Companion'
           }));
         } else {

@@ -5920,8 +5920,7 @@ Guidelines:
               parts: [{ text: q }]
             });
 
-            const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(userGeminiKey)}`;
-            const directRes = await fetch(directUrl, {
+            let directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${encodeURIComponent(userGeminiKey)}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -5934,12 +5933,26 @@ Guidelines:
               })
             });
 
-            const data = await directRes.json();
+            let data = await directRes.json();
+            // Fallback for older keys
+            if (data.error && data.error.code === 404) {
+              directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(userGeminiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  system_instruction: { parts: [{ text: systemInstruction }] },
+                  contents: contents,
+                  generationConfig: { temperature: 0.7, maxOutputTokens: 900 }
+                })
+              });
+              data = await directRes.json();
+            }
+
             if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
               answer = {
-                title: 'Maya AI (Gemini 1.5 Flash)',
+                title: 'Maya AI (Powered by Google Gemini)',
                 reply: data.candidates[0].content.parts[0].text,
-                sources: 'Powered by Google Gemini 1.5 Flash Generative Intelligence',
+                sources: 'Google Gemini Generative AI · Evidence-Based Women\'s Health',
               };
             } else if (data.error) {
               aiError = data.error.message || 'Gemini API returned an error';
@@ -6028,7 +6041,7 @@ Guidelines:
 
       setKeyTesting(true);
       try {
-        const testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(clean)}`, {
+        let testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${encodeURIComponent(clean)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -6036,7 +6049,16 @@ Guidelines:
           })
         });
 
-        const testData = await testRes.json();
+        let testData = await testRes.json();
+        if (testData.error && testData.error.code === 404) {
+          testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(clean)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] })
+          });
+          testData = await testRes.json();
+        }
+
         if (testData.error) {
           throw new Error(testData.error.message || 'Invalid Gemini API key.');
         }
