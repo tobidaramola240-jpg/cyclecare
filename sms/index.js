@@ -9,6 +9,7 @@ const SmsBusAdapter = require('./SmsBusAdapter');
 const SmsOrderStore = require('./SmsOrderStore');
 const SmsProviderRegistry = require('./SmsProviderRegistry');
 const SmsService = require('./SmsService');
+const CustomerWallet = require('./CustomerWallet');
 
 // Instantiate default registry
 const defaultRegistry = new SmsProviderRegistry('smsbus');
@@ -20,10 +21,14 @@ defaultRegistry.register(defaultSmsBus, true);
 // Instantiate default order store
 const defaultOrderStore = new SmsOrderStore();
 
+// Instantiate default customer wallet store
+const defaultWallet = new CustomerWallet();
+
 // Instantiate default unified service
 const defaultSmsService = new SmsService({
   registry: defaultRegistry,
   orderStore: defaultOrderStore,
+  wallet: defaultWallet,
 });
 
 module.exports = {
@@ -34,10 +39,12 @@ module.exports = {
   SmsOrderStore,
   SmsProviderRegistry,
   SmsService,
+  CustomerWallet,
 
   // Default instances
   defaultRegistry,
   defaultOrderStore,
+  defaultWallet,
   defaultSmsService,
 
   // Factory function for customized test or isolated environments
@@ -57,6 +64,11 @@ module.exports = {
       filePath: options.filePath,
     });
 
-    return new SmsService({ registry, orderStore });
+    const wallet = options.wallet || new CustomerWallet({
+      persistToDisk: options.persistToDisk !== false,
+      initialCredit: typeof options.initialCredit === 'number' ? options.initialCredit : 5.00,
+    });
+
+    return new SmsService({ registry, orderStore, wallet });
   },
 };

@@ -99,6 +99,27 @@ async function handleSmsApiRoute(req, res, pathname, searchParams, smsService = 
       return sendJson(res, 200, smsService.getProviderStatus());
     }
 
+    // GET /api/sms/wallet - Customer wallet balance & transactions
+    if (method === 'GET' && pathname === '/api/sms/wallet') {
+      if (!customerId) {
+        return sendJson(res, 401, { error: 'Authentication required: Customer identifier missing.', code: 'UNAUTHORIZED' });
+      }
+      const wallet = smsService.wallet.getBalance(customerId);
+      const transactions = smsService.wallet.getTransactions(customerId);
+      return sendJson(res, 200, { wallet, transactions });
+    }
+
+    // POST /api/sms/wallet/deposit or /api/sms/wallet/topup - Top up customer wallet
+    if (method === 'POST' && (pathname === '/api/sms/wallet/deposit' || pathname === '/api/sms/wallet/topup')) {
+      if (!customerId) {
+        return sendJson(res, 401, { error: 'Authentication required: Customer identifier missing.', code: 'UNAUTHORIZED' });
+      }
+      const body = await parseJsonBody(req);
+      const { amount, description, idempotencyKey } = body;
+      const result = smsService.wallet.deposit(customerId, amount, description, idempotencyKey);
+      return sendJson(res, 200, result);
+    }
+
     // GET /api/sms/balance - Check provider wallet balance
     if (method === 'GET' && pathname === '/api/sms/balance') {
       const providerId = searchParams.get('provider') || undefined;
@@ -138,7 +159,13 @@ async function handleSmsApiRoute(req, res, pathname, searchParams, smsService = 
     if (method === 'POST' && (pathname === '/api/sms/orders' || pathname === '/api/sms/purchase')) {
       const body = await parseJsonBody(req);
       const { countryId, serviceId, reuse, provider, cost, metadata } = body;
-      const resolvedCustomerId = body.customerId || customerId || 'guest_customer';
+      const resolvedCustomerId = body.customerId || customerId;
+
+      if (!resolvedCustomerId) {
+        return sendJson(res, 401, { error: 'Authentication required: Customer identity missing.', code: 'UNAUTHORIZED' });
+      }
+
+      const idempotencyKey = req.headers['x-idempotency-key'] || body.idempotencyKey || null;
 
       if (!countryId || !serviceId) {
         return sendJson(res, 400, { error: 'countryId and serviceId are required in body', code: 'INVALID_PARAMS' });
@@ -151,6 +178,7 @@ async function handleSmsApiRoute(req, res, pathname, searchParams, smsService = 
         reuse: Boolean(reuse),
         providerId: provider || undefined,
         expectedCost: cost || 0,
+        idempotencyKey,
         metadata: metadata || {},
       });
 
@@ -199,7 +227,13 @@ async function handleSmsApiRoute(req, res, pathname, searchParams, smsService = 
     if (method === 'POST' && pathname === '/api/sms/rent') {
       const body = await parseJsonBody(req);
       const { countryId, days, serviceId, provider, cost, metadata } = body;
-      const resolvedCustomerId = body.customerId || customerId || 'guest_customer';
+      const resolvedCustomerId = body.customerId || customerId;
+
+      if (!resolvedCustomerId) {
+        return sendJson(res, 401, { error: 'Authentication required: Customer identity missing.', code: 'UNAUTHORIZED' });
+      }
+
+      const idempotencyKey = req.headers['x-idempotency-key'] || body.idempotencyKey || null;
 
       if (!countryId) {
         return sendJson(res, 400, { error: 'countryId is required to rent a number', code: 'INVALID_PARAMS' });
@@ -212,6 +246,7 @@ async function handleSmsApiRoute(req, res, pathname, searchParams, smsService = 
         serviceId: serviceId || null,
         providerId: provider || undefined,
         expectedCost: cost || 0,
+        idempotencyKey,
         metadata: metadata || {},
       });
 

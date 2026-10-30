@@ -4,7 +4,9 @@
  * Independent frontend platform for:
  * - Virtual phone number procurement (activations & rentals)
  * - Real-time live SMS reception with controlled 3.5s polling loop
- * - Customer multi-tenant isolation
+ * - Customer wallet balance checks, fund reservation, and automatic deduction
+ * - Idempotency protection and duplicate purchase prevention
+ * - Multi-tenant customer isolation
  * - Resilient provider error and timeout handling
  */
 
@@ -32,10 +34,16 @@
 
   function SmsApp() {
     const [customerId, setCustomerId] = useState(getOrCreateCustomerId);
-    const [activeTab, setActiveTab] = useState('active'); // 'active' | 'new' | 'history' | 'suppliers'
+    const [activeTab, setActiveTab] = useState('active'); // 'active' | 'new' | 'wallet' | 'history' | 'suppliers'
     const [activeOrder, setActiveOrder] = useState(null);
     const [orders, setOrders] = useState([]);
     const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+
+    // Customer Wallet & Ledger state
+    const [customerWallet, setCustomerWallet] = useState(null);
+    const [walletTransactions, setWalletTransactions] = useState([]);
+    const [topupModalOpen, setTopupModalOpen] = useState(false);
+    const [topupAmount, setTopupAmount] = useState('10.00');
 
     // Provider balance & info
     const [balanceData, setBalanceData] = useState(null);
@@ -86,7 +94,6 @@
           const list = data.orders || [];
           setOrders(list);
 
-          // If no activeOrder is selected or current activeOrder is not in list, pick the latest pending
           setActiveOrder(current => {
             if (current) {
               const updated = list.find(o => o.id === current.id);
@@ -100,6 +107,22 @@
         console.warn('Failed to load orders:', err.message);
       } finally {
         setIsLoadingOrders(false);
+      }
+    };
+
+    // Load customer wallet balance and transactions
+    const fetchCustomerWallet = async () => {
+      try {
+        const res = await fetch('/api/sms/wallet', {
+          headers: { 'x-customer-id': customerId },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCustomerWallet(data.wallet);
+          setWalletTransactions(data.transactions || []);
+        }
+      } catch (e) {
+        console.warn('Could not load wallet:', e.message);
       }
     };
 
@@ -129,9 +152,10 @@
       } catch (e) {}
     };
 
-    // Load static catalogs (countries, services)
+    // Initial load
     useEffect(() => {
       fetchOrders();
+      fetchCustomerWallet();
       fetchBalance();
       fetchProviders();
 
@@ -238,7 +262,6 @@
               return;
             }
           } else {
-            // Handle provider timeout / network error gracefully without crashing
             const errData = await res.json().catch(() => ({}));
             setPollError(errData.error || ('Provider gateway status: ' + res.status));
           }
@@ -248,10 +271,7 @@
         }
       };
 
-      // Poll immediately on mount
       pollSms();
-
-      // Poll every 3500ms while active
       const interval = setInterval(pollSms, 3500);
 
       return () => {
@@ -282,10 +302,44 @@
       }
     };
 
+    // Deposit / Top Up Wallet handler
+    const handleTopup = async (customAmt) => {
+      const amt = Number(customAmt || topupAmount);
+      if (isNaN(amt) || amt <= 0) {
+        alert('Please enter a valid top-up amount.');
+        return;
+      }
+      try {
+        const res = await fetch('/api/sms/wallet/topup', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-customer-id': customerId,
+          },
+          body: JSON.stringify({
+            amount: amt,
+            description: 'Customer wallet deposit',
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCustomerWallet(data);
+          fetchCustomerWallet();
+          setTopupModalOpen(false);
+          addToast(`Successfully credited $${amt.toFixed(2)} to customer wallet!`, 'success');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          alert(err.error || 'Failed to deposit funds.');
+        }
+      } catch (err) {
+        alert('Network error while depositing funds.');
+      }
+    };
+
     // Cancel active reservation
     const handleCancelOrder = async () => {
       if (!activeOrder || activeOrder.status !== 'PENDING') return;
-      if (!confirm('Cancel this reservation and release the phone number back to upstream provider?')) return;
+      if (!confirm('Cancel this reservation? Number will be released and funds refunded.')) return;
 
       const endpoint = activeOrder.type === 'rental'
         ? '/api/sms/rent/' + encodeURIComponent(activeOrder.id) + '/cancel'
@@ -304,8 +358,9 @@
         if (res.ok) {
           setActiveOrder(prev => prev ? { ...prev, status: 'CANCELLED' } : null);
           setIsPolling(false);
-          addToast('Reservation cancelled and released.', 'info');
+          addToast('Reservation cancelled. Funds refunded to wallet.', 'info');
           fetchOrders();
+          fetchCustomerWallet();
         } else {
           alert(data.error || 'Failed to cancel order.');
         }
@@ -314,10 +369,13 @@
       }
     };
 
-    // Purchase / Reserve Number
+    // Purchase / Reserve Number with Wallet Integration & Idempotency
     const handlePurchaseNumber = async () => {
       setIsPurchasing(true);
       setPurchaseError(null);
+
+      // Unique idempotency key to prevent double charging
+      const idempotencyKey = 'idemp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 
       const endpoint = purchaseType === 'rental' ? '/api/sms/rent' : '/api/sms/orders';
       const payload = purchaseType === 'rental'
@@ -326,11 +384,13 @@
             serviceId: Number(selectedService) || null,
             days: Number(rentalDays) || 30,
             customerId,
+            idempotencyKey,
           }
         : {
             countryId: Number(selectedCountry),
             serviceId: Number(selectedService),
             customerId,
+            idempotencyKey,
           };
 
       try {
@@ -339,6 +399,7 @@
           headers: {
             'Content-Type': 'application/json',
             'x-customer-id': customerId,
+            'x-idempotency-key': idempotencyKey,
           },
           body: JSON.stringify(payload),
         });
@@ -350,10 +411,14 @@
           setPollCount(0);
           setPollError(null);
           fetchOrders();
+          fetchCustomerWallet();
           fetchBalance();
-          addToast('Phone number ' + (data.number || data.order.number) + ' reserved successfully!', 'success');
+          addToast(`Number ${data.number || data.order.number} reserved! Deducted $${Number(data.cost || 0.50).toFixed(2)} from wallet.`, 'success');
+        } else if (res.status === 402) {
+          setPurchaseError(data.error || 'Insufficient wallet balance. Please add funds.');
+          setTopupModalOpen(true);
         } else {
-          setPurchaseError(data.error || 'Could not reserve number. The service may be temporarily out of stock.');
+          setPurchaseError(data.error || 'Could not reserve number. The service may be out of stock.');
         }
       } catch (err) {
         setPurchaseError('Network error connecting to SMS provider.');
@@ -405,18 +470,19 @@
         ),
 
         h('div', { className: 'flex items-center gap-2 sm:gap-3' },
-          // Upstream balance widget
-          balanceData && h('div', {
-            className: 'hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-xs',
-            title: 'Provider Account Wallet Balance'
+          // Customer Wallet Balance widget with quick top-up
+          h('div', {
+            className: 'flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/90 border border-emerald-500/40 text-xs shadow-inner cursor-pointer hover:bg-slate-800 transition-all',
+            onClick: () => setTopupModalOpen(true),
+            title: 'Customer Wallet Balance (Click to Top Up)'
           },
-            h('span', { className: 'text-slate-400' }, '💳 Balance:'),
-            h('span', { className: 'font-mono font-bold text-emerald-400' }, '$' + (balanceData.balance || '0.00')),
+            h('span', { className: 'text-emerald-400 font-bold' }, '💳'),
+            h('span', { className: 'text-slate-300 font-medium hidden sm:inline' }, 'Wallet:'),
+            h('span', { className: 'font-mono font-black text-emerald-400' }, '$' + (customerWallet ? customerWallet.available.toFixed(2) : '5.00')),
             h('button', {
-              onClick: fetchBalance,
-              className: 'text-slate-400 hover:text-white transition-colors ml-1',
-              title: 'Refresh balance'
-            }, '↻')
+              type: 'button',
+              className: 'ml-1 px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500 hover:text-slate-950 text-[10px] font-extrabold transition-all'
+            }, '+ Top Up')
           ),
 
           // Customer Tenant Selector
@@ -436,7 +502,7 @@
 
       // ===== TAB SELECTION BAR =====
       h('div', { className: 'bg-slate-900 border-b border-slate-800 px-4 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3' },
-        h('div', { className: 'flex gap-1.5 sm:gap-2' },
+        h('div', { className: 'flex flex-wrap gap-1.5 sm:gap-2' },
           h('button', {
             type: 'button',
             onClick: () => setActiveTab('active'),
@@ -451,6 +517,12 @@
             onClick: () => setActiveTab('new'),
             className: 'flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ' + (activeTab === 'new' ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-300')
           }, '➕ Reserve Number'),
+
+          h('button', {
+            type: 'button',
+            onClick: () => { setActiveTab('wallet'); fetchCustomerWallet(); },
+            className: 'flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ' + (activeTab === 'wallet' ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-300')
+          }, '💳 Wallet & Billing'),
 
           h('button', {
             type: 'button',
@@ -481,7 +553,7 @@
             h('div', { className: 'w-16 h-16 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center text-3xl' }, '📥'),
             h('h2', { className: 'text-xl font-bold text-white' }, 'No Active Number Reservation'),
             h('p', { className: 'text-xs text-slate-400 leading-relaxed' },
-              'Reserve a clean virtual phone number from SMS-BUS to receive your verification code or OTP in real-time.'
+              'Reserve a clean virtual phone number from SMS-BUS to receive your verification code or OTP in real-time. Charges are debited securely from your customer wallet.'
             ),
             h('button', {
               type: 'button',
@@ -524,7 +596,7 @@
                 )
               ),
 
-              // Badges row: Country, Service, Order Reference
+              // Badges row: Country, Service, Order Reference, Cost
               h('div', { className: 'pt-4 border-t border-slate-800 flex flex-wrap items-center gap-2.5 text-xs' },
                 h('span', { className: 'px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-300 font-semibold flex items-center gap-1.5' },
                   h('span', null, '🌍'),
@@ -544,8 +616,8 @@
                   h('span', null, activeOrder.id),
                   copiedKey === 'orderId' && h('span', { className: 'font-bold' }, '✓')
                 ),
-                h('span', { className: 'px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 font-mono text-[11px]' },
-                  'Type: ' + (activeOrder.type || 'activation')
+                h('span', { className: 'px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[11px] font-bold' },
+                  'Cost: $' + Number(activeOrder.cost || 0.50).toFixed(2)
                 )
               )
             ),
@@ -614,7 +686,7 @@
             // Cancelled or Expired State Notice
             activeOrder.status === 'CANCELLED' && h('div', { className: 'bg-slate-900 border border-slate-800 rounded-3xl p-6 text-xs text-slate-400 space-y-1' },
               h('div', { className: 'font-bold text-white text-sm' }, 'Order Cancelled'),
-              h('p', null, 'This reservation has been cancelled. Polling has stopped and the number was released back to the provider.')
+              h('p', null, 'This reservation has been cancelled. Polling has stopped and the number was released back to provider.')
             ),
 
             activeOrder.status === 'EXPIRED' && h('div', { className: 'bg-rose-950/30 border border-rose-500/30 rounded-3xl p-6 text-xs text-rose-300 space-y-1' },
@@ -628,7 +700,7 @@
                 type: 'button',
                 onClick: handleCancelOrder,
                 className: 'px-5 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold transition-all cursor-pointer'
-              }, '🚫 Cancel Reservation') : h('div', null),
+              }, '🚫 Cancel & Refund Reservation') : h('div', null),
 
               h('div', { className: 'flex gap-2' },
                 h('button', {
@@ -667,8 +739,13 @@
             }, '🗓️ Long-Term Rental (Days)')
           ),
 
-          purchaseError && h('div', { className: 'p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 font-semibold' },
-            '⚠️ ' + purchaseError
+          purchaseError && h('div', { className: 'p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 font-semibold space-y-2' },
+            h('div', null, '⚠️ ' + purchaseError),
+            purchaseError.includes('Insufficient') && h('button', {
+              type: 'button',
+              onClick: () => setTopupModalOpen(true),
+              className: 'px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs'
+            }, '💳 Top Up Wallet Now')
           ),
 
           // Country Selector
@@ -713,16 +790,30 @@
             )
           ),
 
-          // Live Price & Stock Banner
-          pricesData && h('div', { className: 'p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs text-slate-300' },
-            h('div', { className: 'flex items-center gap-2' },
-              h('span', null, '💰'),
-              h('span', null, 'Estimated Cost: '),
-              h('strong', { className: 'text-emerald-400 font-mono text-sm' }, pricesData.cost ? ('$' + pricesData.cost) : '$0.50')
+          // Live Price, Stock & Wallet Balance Comparison Card
+          h('div', { className: 'p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5 text-xs' },
+            h('div', { className: 'flex items-center justify-between text-slate-300' },
+              h('div', { className: 'flex items-center gap-2' },
+                h('span', null, '💰'),
+                h('span', null, 'Current Provider Price:'),
+                h('strong', { className: 'text-emerald-400 font-mono text-sm' }, pricesData && pricesData.cost ? ('$' + pricesData.cost) : '$0.50')
+              ),
+              h('div', { className: 'flex items-center gap-2' },
+                h('span', null, '📦 Stock:'),
+                h('span', { className: 'font-semibold text-emerald-400 font-mono' }, (pricesData && pricesData.count ? pricesData.count : 'Available') + ' numbers')
+              )
             ),
-            h('div', { className: 'flex items-center gap-2' },
-              h('span', null, '📦 Stock: '),
-              h('span', { className: 'font-semibold text-emerald-400 font-mono' }, (pricesData.count || 'Available') + ' numbers')
+            h('div', { className: 'pt-2 border-t border-slate-800/80 flex items-center justify-between text-slate-400' },
+              h('div', { className: 'flex items-center gap-2' },
+                h('span', null, '💳'),
+                h('span', null, 'Available Wallet Balance:'),
+                h('span', { className: 'font-mono font-bold text-emerald-400' }, '$' + (customerWallet ? customerWallet.available.toFixed(2) : '5.00'))
+              ),
+              h('button', {
+                type: 'button',
+                onClick: () => setTopupModalOpen(true),
+                className: 'text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer'
+              }, '+ Add Funds')
             )
           ),
 
@@ -742,7 +833,109 @@
           )
         ),
 
-        // ===== TAB 3: ORDER HISTORY =====
+        // ===== TAB 3: CUSTOMER WALLET & BILLING LEDGER =====
+        activeTab === 'wallet' && h('div', { className: 'bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6' },
+          h('div', { className: 'flex flex-col sm:flex-row sm:items-center justify-between gap-4' },
+            h('div', null,
+              h('h2', { className: 'text-xl font-bold text-white' }, 'Customer Wallet & Transaction Ledger'),
+              h('p', { className: 'text-xs text-slate-400 mt-0.5' }, 'Multi-tenant isolated wallet for tenant: ' + customerId)
+            ),
+            h('button', {
+              type: 'button',
+              onClick: () => setTopupModalOpen(true),
+              className: 'px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-md transition-all cursor-pointer'
+            }, '💳 Top Up Wallet')
+          ),
+
+          // Balances Overview Cards
+          h('div', { className: 'grid grid-cols-1 sm:grid-cols-3 gap-4' },
+            h('div', { className: 'p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1' },
+              h('span', { className: 'text-[11px] font-bold uppercase tracking-wider text-slate-400' }, 'Available Balance'),
+              h('div', { className: 'text-3xl font-black font-mono text-emerald-400' }, '$' + (customerWallet ? customerWallet.available.toFixed(2) : '5.00')),
+              h('p', { className: 'text-[11px] text-slate-500' }, 'Ready for number purchases')
+            ),
+
+            h('div', { className: 'p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1' },
+              h('span', { className: 'text-[11px] font-bold uppercase tracking-wider text-slate-400' }, 'Reserved In-Flight'),
+              h('div', { className: 'text-3xl font-black font-mono text-amber-400' }, '$' + (customerWallet ? customerWallet.reserved.toFixed(2) : '0.00')),
+              h('p', { className: 'text-[11px] text-slate-500' }, 'Held during provider provisioning')
+            ),
+
+            h('div', { className: 'p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1' },
+              h('span', { className: 'text-[11px] font-bold uppercase tracking-wider text-slate-400' }, 'Total Credited'),
+              h('div', { className: 'text-3xl font-black font-mono text-white' }, '$' + (customerWallet ? customerWallet.balance.toFixed(2) : '5.00')),
+              h('p', { className: 'text-[11px] text-slate-500' }, 'Available + Reserved')
+            )
+          ),
+
+          // Quick Deposit Buttons
+          h('div', { className: 'p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3' },
+            h('span', { className: 'text-xs font-bold text-slate-300 block' }, 'Quick Top-Up Demo Credits:'),
+            h('div', { className: 'flex flex-wrap gap-2.5' },
+              ['5.00', '10.00', '25.00', '50.00'].map(amt => h('button', {
+                key: amt,
+                type: 'button',
+                onClick: () => handleTopup(amt),
+                className: 'px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-emerald-300 transition-all cursor-pointer'
+              }, `+$${amt}`))
+            )
+          ),
+
+          // Complete Ledger History
+          h('div', { className: 'space-y-3' },
+            h('div', { className: 'flex items-center justify-between' },
+              h('h3', { className: 'text-sm font-bold text-white' }, 'Transaction Audit Ledger (' + walletTransactions.length + ')'),
+              h('button', {
+                type: 'button',
+                onClick: fetchCustomerWallet,
+                className: 'text-xs text-emerald-400 hover:underline font-semibold'
+              }, '🔄 Refresh Ledger')
+            ),
+
+            walletTransactions.length === 0 ? h('div', { className: 'text-center py-8 text-xs text-slate-500' },
+              'No transactions recorded yet.'
+            ) : h('div', { className: 'space-y-2' },
+              walletTransactions.map(tx => {
+                const isDebit = tx.type === 'PURCHASE_DEBIT';
+                const isDeposit = tx.type === 'DEPOSIT';
+                const isHold = tx.type === 'HOLD_RESERVED';
+                const isRelease = tx.type === 'HOLD_RELEASED';
+
+                return h('div', {
+                  key: tx.id,
+                  className: 'p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 flex items-center justify-between gap-3 text-xs'
+                },
+                  h('div', { className: 'space-y-0.5' },
+                    h('div', { className: 'flex items-center gap-2' },
+                      h('span', {
+                        className: 'font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded ' +
+                          (isDebit ? 'bg-rose-500/20 text-rose-300' :
+                           isDeposit ? 'bg-emerald-500/20 text-emerald-300' :
+                           isHold ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-300')
+                      }, tx.type),
+                      h('span', { className: 'font-semibold text-slate-200' }, tx.description || tx.referenceId)
+                    ),
+                    h('div', { className: 'text-[11px] text-slate-500 font-mono' },
+                      formatTimestamp(tx.timestamp) + ' · Ref: ' + (tx.referenceId || tx.id)
+                    )
+                  ),
+
+                  h('div', { className: 'text-right' },
+                    h('div', {
+                      className: 'font-mono font-bold text-sm ' +
+                        (isDebit ? 'text-rose-400' : isDeposit ? 'text-emerald-400' : 'text-slate-300')
+                    }, (isDebit ? '-' : isDeposit ? '+' : '') + '$' + Number(tx.amount).toFixed(2)),
+                    h('div', { className: 'text-[10px] text-slate-500 font-mono' },
+                      'Bal: $' + Number(tx.balanceAfter).toFixed(2)
+                    )
+                  )
+                );
+              })
+            )
+          )
+        ),
+
+        // ===== TAB 4: ORDER HISTORY =====
         activeTab === 'history' && h('div', { className: 'bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-5' },
           h('div', { className: 'flex items-center justify-between' },
             h('div', null,
@@ -793,7 +986,7 @@
           )
         ),
 
-        // ===== TAB 4: UPSTREAM SUPPLIERS & API =====
+        // ===== TAB 5: UPSTREAM SUPPLIERS & API =====
         activeTab === 'suppliers' && h('div', { className: 'bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6' },
           h('div', null,
             h('h2', { className: 'text-xl font-bold text-white' }, 'Upstream SMS Provider Architecture'),
@@ -836,6 +1029,53 @@
         )
       ),
 
+      // ===== TOP UP WALLET MODAL =====
+      topupModalOpen && h('div', { className: 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm' },
+        h('div', { className: 'bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl' },
+          h('div', { className: 'flex items-center justify-between' },
+            h('div', { className: 'flex items-center gap-2' },
+              h('span', { className: 'text-lg' }, '💳'),
+              h('h3', { className: 'text-base font-bold text-white' }, 'Top Up Customer Wallet')
+            ),
+            h('button', { onClick: () => setTopupModalOpen(false), className: 'text-slate-400 hover:text-white' }, '✕')
+          ),
+          h('p', { className: 'text-xs text-slate-400' },
+            'Deposit funds into your customer account to reserve numbers and receive live verification SMS.'
+          ),
+          h('div', { className: 'space-y-1.5' },
+            h('label', { className: 'text-xs font-bold text-slate-300 block' }, 'Select or Enter Amount ($ USD):'),
+            h('div', { className: 'flex gap-2 mb-2' },
+              ['5.00', '10.00', '25.00'].map(amt => h('button', {
+                key: amt,
+                type: 'button',
+                onClick: () => setTopupAmount(amt),
+                className: 'flex-1 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ' +
+                  (topupAmount === amt ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-950 border-slate-700 text-slate-300 hover:bg-slate-800')
+              }, `$${amt}`))
+            ),
+            h('input', {
+              type: 'number',
+              step: '0.50',
+              value: topupAmount,
+              onChange: (e) => setTopupAmount(e.target.value),
+              className: 'w-full p-2.5 rounded-xl border border-slate-700 text-sm font-mono text-emerald-300 bg-slate-950 focus:outline-none focus:ring-2 focus:ring-emerald-500'
+            })
+          ),
+          h('div', { className: 'pt-2 flex justify-end gap-2' },
+            h('button', {
+              type: 'button',
+              onClick: () => setTopupModalOpen(false),
+              className: 'px-4 py-2 rounded-xl border border-slate-700 text-xs text-slate-300 hover:bg-slate-800'
+            }, 'Cancel'),
+            h('button', {
+              type: 'button',
+              onClick: () => handleTopup(topupAmount),
+              className: 'px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs'
+            }, `✓ Credit $${Number(topupAmount || 0).toFixed(2)}`)
+          )
+        )
+      ),
+
       // ===== CUSTOMER TENANT MODAL =====
       tenantModalOpen && h('div', { className: 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm' },
         h('div', { className: 'bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl' },
@@ -844,7 +1084,7 @@
             h('button', { onClick: () => setTenantModalOpen(false), className: 'text-slate-400 hover:text-white' }, '✕')
           ),
           h('p', { className: 'text-xs text-slate-400' },
-            'Each customer has an isolated partition. Other customers cannot view, poll, or cancel orders that do not belong to them.'
+            'Each customer has an isolated wallet and message partition. Other customers cannot view, poll, or cancel orders that do not belong to them.'
           ),
           h('div', { className: 'space-y-1.5' },
             h('label', { className: 'text-xs font-bold text-slate-300 block' }, 'Current Customer Identifier:'),

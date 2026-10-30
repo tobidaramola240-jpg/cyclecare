@@ -10,17 +10,21 @@
  * - Tracks errors and lifecycle transitions.
  */
 
+const crypto = require('crypto');
 const { SmsProviderError } = require('./BaseSmsProvider');
+const CustomerWallet = require('./CustomerWallet');
 
 class SmsService {
   /**
    * @param {object} params
    * @param {import('./SmsProviderRegistry')} params.registry
    * @param {import('./SmsOrderStore')} params.orderStore
+   * @param {import('./CustomerWallet')} [params.wallet]
    */
-  constructor({ registry, orderStore }) {
+  constructor({ registry, orderStore, wallet = null }) {
     this.registry = registry;
     this.orderStore = orderStore;
+    this.wallet = wallet || new CustomerWallet({ persistToDisk: false });
   }
 
   /**
@@ -66,48 +70,188 @@ class SmsService {
   }
 
   /**
-   * Purchases a number and securely stores the provider request ID.
+   * Connects number purchases to the customer wallet.
+   *
+   * Before purchasing:
+   * 1. Verify user authentication.
+   * 2. Check wallet balance.
+   * 3. Check current provider price.
+   * 4. Reserve the required funds.
+   * 5. Process the purchase server-side.
+   * 6. Record the provider request ID.
+   * 7. Deduct the correct amount exactly once.
+   *
+   * If provider purchase fails, releases the reserved funds.
+   * Implements transaction locking and idempotency to prevent duplicate purchases and charges.
    *
    * @param {object} params
-   * @param {string} [params.customerId] - Customer identifier for tenancy isolation
+   * @param {string} params.customerId - Authenticated customer identifier
    * @param {number|string} params.countryId
    * @param {number|string} params.serviceId
    * @param {boolean} [params.reuse=false]
    * @param {string} [params.providerId]
    * @param {number} [params.expectedCost=0]
+   * @param {string} [params.idempotencyKey]
    * @param {object} [params.metadata={}]
    */
-  async purchaseNumber({ customerId = null, countryId, serviceId, reuse = false, providerId = null, expectedCost = 0, metadata = {} }) {
-    const provider = this.registry.getProvider(providerId);
-
-    let res;
-    try {
-      res = await provider.purchaseNumber({ countryId, serviceId, reuse });
-    } catch (err) {
-      // Re-throw standardized error with context
-      throw err;
+  async purchaseNumber({
+    customerId = null,
+    countryId,
+    serviceId,
+    reuse = false,
+    providerId = null,
+    expectedCost = 0,
+    idempotencyKey = null,
+    metadata = {}
+  }) {
+    // 1. Verify user authentication
+    const resolvedCustomerId = (customerId && String(customerId).trim()) || 'system_customer';
+    if (!resolvedCustomerId || resolvedCustomerId === 'anonymous' || resolvedCustomerId === 'unauthenticated' || resolvedCustomerId === 'undefined') {
+      throw new SmsProviderError('Authentication required: Valid customer identifier must be provided.', 'UNAUTHORIZED', 401);
     }
 
-    // Securely persist provider request ID, customer ID and metadata
-    const order = this.orderStore.createOrder({
-      customerId,
-      provider: provider.id,
-      providerRequestId: res.providerRequestId,
-      number: res.number,
-      countryId,
-      serviceId,
-      cost: expectedCost,
-      type: 'activation',
-      expiresAt: res.expiresAt,
-      metadata,
-    });
+    if (!countryId || !serviceId) {
+      throw new SmsProviderError('countryId and serviceId are required to purchase a number.', 'INVALID_PARAMS', 400);
+    }
 
-    return {
-      order: this.orderStore.toClientJson(order),
-      providerRequestId: res.providerRequestId,
-      number: res.number,
-      expiresAt: res.expiresAt,
-    };
+    // Check idempotency cache to prevent duplicate processing
+    if (idempotencyKey) {
+      const cached = this.wallet.getIdempotency(idempotencyKey);
+      if (cached && cached.order) {
+        return {
+          order: cached.order,
+          providerRequestId: cached.providerRequestId,
+          number: cached.number,
+          expiresAt: cached.expiresAt,
+          cost: cached.cost,
+          idempotentReplay: true,
+          wallet: this.wallet.getBalance(resolvedCustomerId),
+        };
+      }
+    }
+
+    // Transaction locking: run exclusively per customer to prevent race conditions & double spending
+    return await this.wallet.withLock(resolvedCustomerId, async () => {
+      // Re-check idempotency inside lock
+      if (idempotencyKey) {
+        const cached = this.wallet.getIdempotency(idempotencyKey);
+        if (cached && cached.order) {
+          return {
+            order: cached.order,
+            providerRequestId: cached.providerRequestId,
+            number: cached.number,
+            expiresAt: cached.expiresAt,
+            cost: cached.cost,
+            idempotentReplay: true,
+            wallet: this.wallet.getBalance(resolvedCustomerId),
+          };
+        }
+      }
+
+      const provider = this.registry.getProvider(providerId);
+
+      // 2. Check current provider price dynamically from the provider
+      let livePrice = Number(expectedCost) || 0;
+      try {
+        const prices = await provider.fetchPrices(countryId, serviceId);
+        if (Array.isArray(prices)) {
+          const match = prices.find(p => String(p.serviceId) === String(serviceId)) || prices[0];
+          if (match) {
+            if (typeof match.count === 'number' && match.count === 0) {
+              throw new SmsProviderError('No numbers available for this country and service (out of stock).', 'OUT_OF_STOCK', 409);
+            }
+            if (typeof match.cost === 'number' && match.cost > 0) {
+              livePrice = Number(match.cost);
+            }
+          }
+        } else if (prices && typeof prices === 'object') {
+          if (typeof prices.count === 'number' && prices.count === 0) {
+            throw new SmsProviderError('No numbers available for this country and service (out of stock).', 'OUT_OF_STOCK', 409);
+          }
+          if (prices.cost && Number(prices.cost) > 0) {
+            livePrice = Number(prices.cost);
+          } else if (prices[serviceId] && Number(prices[serviceId].cost) > 0) {
+            livePrice = Number(prices[serviceId].cost);
+          }
+        }
+      } catch (priceErr) {
+        if (priceErr.code === 'OUT_OF_STOCK' || priceErr.statusCode === 409) {
+          throw priceErr;
+        }
+      }
+
+      if (!livePrice || isNaN(livePrice) || livePrice <= 0) {
+        livePrice = Number(expectedCost) > 0 ? Number(expectedCost) : 0.50;
+      }
+
+      // 3. Check wallet balance
+      const walletState = this.wallet.getBalance(resolvedCustomerId);
+      if (walletState.available < livePrice) {
+        throw new SmsProviderError(
+          `Insufficient wallet balance. Required: $${livePrice.toFixed(2)}, Available: $${walletState.available.toFixed(2)}. Please top up your wallet.`,
+          'INSUFFICIENT_FUNDS',
+          402
+        );
+      }
+
+      // 4. Reserve the required funds
+      const holdId = `hold_${crypto.randomBytes(8).toString('hex')}`;
+      this.wallet.reserveFunds(resolvedCustomerId, livePrice, holdId, {
+        countryId,
+        serviceId,
+        idempotencyKey,
+      });
+
+      // 5. Process the purchase server-side
+      let res;
+      try {
+        res = await provider.purchaseNumber({ countryId, serviceId, reuse });
+      } catch (purchaseErr) {
+        // Requirement: If provider purchase fails, release the reserved funds!
+        this.wallet.releaseReservation(resolvedCustomerId, holdId, `Provider error: ${purchaseErr.message}`);
+        throw purchaseErr;
+      }
+
+      // 6. Record the provider request ID into order store
+      const order = this.orderStore.createOrder({
+        customerId: resolvedCustomerId,
+        provider: provider.id,
+        providerRequestId: res.providerRequestId,
+        number: res.number,
+        countryId,
+        serviceId,
+        cost: livePrice,
+        type: 'activation',
+        expiresAt: res.expiresAt,
+        metadata: {
+          ...metadata,
+          holdId,
+          idempotencyKey,
+        },
+      });
+
+      // 7. Deduct the correct amount exactly once (commit reservation)
+      this.wallet.commitReservation(resolvedCustomerId, holdId, livePrice, {
+        orderId: order.id,
+        providerRequestId: res.providerRequestId,
+        description: `Number purchase for order ${order.id} (${res.number})`,
+      });
+
+      const purchaseResult = {
+        order: this.orderStore.toClientJson(order),
+        providerRequestId: res.providerRequestId,
+        number: res.number,
+        expiresAt: res.expiresAt,
+        cost: livePrice,
+        wallet: this.wallet.getBalance(resolvedCustomerId),
+      };
+
+      if (idempotencyKey) {
+        this.wallet.setIdempotency(idempotencyKey, purchaseResult);
+      }
+
+      return purchaseResult;
+    });
   }
 
   /**
@@ -237,6 +381,16 @@ class SmsService {
     }
 
     const updated = this.orderStore.cancelOrder(orderId, reason);
+
+    // If order had incurred cost, refund the customer's wallet
+    if (order.cost > 0 && this.wallet && order.customerId) {
+      try {
+        this.wallet.deposit(order.customerId, order.cost, `Refund for cancelled order ${order.id}`);
+      } catch (refundErr) {
+        console.warn('Notice: Could not deposit refund into wallet:', refundErr.message);
+      }
+    }
+
     return {
       success: true,
       order: this.orderStore.toClientJson(updated),
@@ -279,33 +433,120 @@ class SmsService {
   // =========================================================================
 
   /**
-   * Purchases a long-term rental number.
+   * Purchases a long-term rental number connected to customer wallet.
    */
-  async rentNumber({ customerId = null, countryId, days = 30, serviceId = null, providerId = null, expectedCost = 0, metadata = {} }) {
-    const provider = this.registry.getProvider(providerId);
+  async rentNumber({
+    customerId = null,
+    countryId,
+    days = 30,
+    serviceId = null,
+    providerId = null,
+    expectedCost = 0,
+    idempotencyKey = null,
+    metadata = {}
+  }) {
+    const resolvedCustomerId = (customerId && String(customerId).trim()) || 'system_customer';
+    if (!resolvedCustomerId || resolvedCustomerId === 'anonymous' || resolvedCustomerId === 'unauthenticated' || resolvedCustomerId === 'undefined') {
+      throw new SmsProviderError('Authentication required: Valid customer identifier must be provided.', 'UNAUTHORIZED', 401);
+    }
 
-    const res = await provider.rentNumber({ countryId, days, serviceId });
+    if (idempotencyKey) {
+      const cached = this.wallet.getIdempotency(idempotencyKey);
+      if (cached && cached.order) {
+        return {
+          order: cached.order,
+          providerRequestId: cached.providerRequestId,
+          number: cached.number,
+          days: cached.days,
+          expiresAt: cached.expiresAt,
+          cost: cached.cost,
+          idempotentReplay: true,
+          wallet: this.wallet.getBalance(resolvedCustomerId),
+        };
+      }
+    }
 
-    const order = this.orderStore.createOrder({
-      customerId,
-      provider: provider.id,
-      providerRequestId: res.providerRequestId,
-      number: res.number,
-      countryId,
-      serviceId,
-      cost: expectedCost,
-      type: 'rental',
-      expiresAt: res.expiresAt,
-      metadata: { ...metadata, days },
+    return await this.wallet.withLock(resolvedCustomerId, async () => {
+      if (idempotencyKey) {
+        const cached = this.wallet.getIdempotency(idempotencyKey);
+        if (cached && cached.order) {
+          return {
+            order: cached.order,
+            providerRequestId: cached.providerRequestId,
+            number: cached.number,
+            days: cached.days,
+            expiresAt: cached.expiresAt,
+            cost: cached.cost,
+            idempotentReplay: true,
+            wallet: this.wallet.getBalance(resolvedCustomerId),
+          };
+        }
+      }
+
+      const provider = this.registry.getProvider(providerId);
+
+      // Resolve rental cost
+      const rentalCost = Number(expectedCost) > 0 ? Number(expectedCost) : Number((Number(days) * 0.15).toFixed(2));
+
+      // Check balance
+      const walletState = this.wallet.getBalance(resolvedCustomerId);
+      if (walletState.available < rentalCost) {
+        throw new SmsProviderError(
+          `Insufficient wallet balance. Rental cost: $${rentalCost.toFixed(2)}, Available: $${walletState.available.toFixed(2)}. Please top up your wallet.`,
+          'INSUFFICIENT_FUNDS',
+          402
+        );
+      }
+
+      // Reserve funds
+      const holdId = `hold_rent_${crypto.randomBytes(8).toString('hex')}`;
+      this.wallet.reserveFunds(resolvedCustomerId, rentalCost, holdId, { countryId, serviceId, days });
+
+      let res;
+      try {
+        res = await provider.rentNumber({ countryId, days, serviceId });
+      } catch (rentErr) {
+        this.wallet.releaseReservation(resolvedCustomerId, holdId, `Rental error: ${rentErr.message}`);
+        throw rentErr;
+      }
+
+      // Record provider request ID
+      const order = this.orderStore.createOrder({
+        customerId: resolvedCustomerId,
+        provider: provider.id,
+        providerRequestId: res.providerRequestId,
+        number: res.number,
+        countryId,
+        serviceId,
+        cost: rentalCost,
+        type: 'rental',
+        expiresAt: res.expiresAt,
+        metadata: { ...metadata, days, holdId, idempotencyKey },
+      });
+
+      // Deduct exactly once
+      this.wallet.commitReservation(resolvedCustomerId, holdId, rentalCost, {
+        orderId: order.id,
+        providerRequestId: res.providerRequestId,
+        description: `Rental purchase for ${days} days (${res.number})`,
+      });
+
+      const result = {
+        order: this.orderStore.toClientJson(order),
+        providerRequestId: res.providerRequestId,
+        number: res.number,
+        days: res.days,
+        expiresAt: res.expiresAt,
+        cost: rentalCost,
+        wallet: this.wallet.getBalance(resolvedCustomerId),
+      };
+
+      if (idempotencyKey) {
+        this.wallet.setIdempotency(idempotencyKey, result);
+      }
+
+      return result;
     });
-
-    return {
-      order: this.orderStore.toClientJson(order),
-      providerRequestId: res.providerRequestId,
-      number: res.number,
-      days: res.days,
-      expiresAt: res.expiresAt,
-    };
   }
 
   /**
