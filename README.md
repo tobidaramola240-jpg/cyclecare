@@ -269,28 +269,76 @@ CycleCare integrates **SMS-BUS** (`https://sms-bus.com`) as an upstream SMS prov
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
+| `GET` | `/api/sms/status` | Real-time provider health, response latency ping, uptime SLA, and route availability. |
+| `GET` | `/api/sms/policy` | Official Acceptable Use Policy (carrier compliance and anti-bulk abuse rules). |
+| `POST` | `/api/sms/auth/register` | Registers customer account with salted Scrypt hash and issues signed session token. |
+| `POST` | `/api/sms/auth/login` | Authenticates customer or admin credentials with constant-time equality check. |
+| `GET` | `/api/sms/auth/me` | Returns current authenticated user and session role (`CUSTOMER` vs `ADMIN`). |
+| `POST` | `/api/sms/auth/logout` | Revokes current session and logs audit event. |
+| `GET` | `/api/sms/wallet` | Tenant-isolated customer wallet balance, reserved holds, and immutable ledger. |
+| `POST` | `/api/sms/wallet/topup` | Credits wallet with optional cryptographic payment intent or signature verification. |
+| `POST` | `/api/sms/wallet/intent` | Generates signed HMAC-SHA256 payment intent with timestamp window. |
+| `POST` | `/api/sms/wallet/verify-payment` | Verifies cryptographic payment proof and credits funds atomically. |
+| `GET` | `/api/sms/admin/stats` | (Admin Only) Platform-wide aggregate metrics, active reservations, and user counts. |
+| `GET` | `/api/sms/admin/audit-logs` | (Admin Only) Queries tamper-evident security and financial audit trail. |
+| `GET` | `/api/sms/admin/users` | (Admin Only) Lists registered users with sanitized credential views. |
 | `GET` | `/api/sms/providers` | Lists configured providers and current active supplier. |
 | `GET` | `/api/sms/balance` | Checks wallet balance and currency on the active provider. |
 | `GET` | `/api/sms/countries` | Fetches available countries and regions (`/list/countries`). |
-| `GET` | `/api/sms/services` | Fetches available services and projects (`/list/projects`). |
+| `GET` | `/api/sms/services` | Fetches verified services annotated with live provider inventory (`/list/projects`). |
 | `GET` | `/api/sms/prices?countryId={id}` | Fetches country-specific service prices & live stock (`/list/prices`). |
-| `POST` | `/api/sms/orders` | Purchases a number (`/get/number`) and securely stores `providerRequestId`. |
-| `GET` | `/api/sms/orders` | Lists server-side tracked orders and verification lifecycles. |
-| `GET` | `/api/sms/orders/:orderId` | Retrieves order details, verification status, and error logs. |
-| `GET` | `/api/sms/orders/:orderId/sms` | Polls incoming SMS message and extracts verification code (`/get/sms`). |
-| `POST` | `/api/sms/orders/:orderId/cancel` | Cancels eligible order and releases number (`/cancel`). |
+| `POST` | `/api/sms/orders` | Purchases a number (`/get/number`) with 2-phase reserve-and-commit fund deduction. |
+| `GET` | `/api/sms/orders` | Lists tenant-scoped orders (customers see only their own; admins see all). |
+| `GET` | `/api/sms/orders/:orderId` | Retrieves order details, verification status, and error logs (tenant isolated). |
+| `GET` | `/api/sms/orders/:orderId/sms` | Polls incoming SMS message with sliding-window rate limit (`/get/sms`). |
+| `POST` | `/api/sms/orders/:orderId/cancel` | Cancels eligible order and refunds wallet balance (`/cancel`). |
 | `POST` | `/api/sms/rent` | Orders long-term virtual number rental (`/rent/get/number`). |
 | `GET` | `/api/sms/rent/:orderId/sms` | Checks incoming SMS received on rental numbers (`/rent/get/sms`). |
 | `POST` | `/api/sms/rent/:orderId/cancel` | Cancels active rental subscription (`/rent/cancel`). |
 
-### 🧪 Running Provider Tests
+### 🛡️ Production Security & Compliance Architecture
+
+1. **Authentication & RBAC**:
+   - Password hashing with individual 16-byte cryptographically secure random salts and Scrypt derivation (64-byte key).
+   - Constant-time verification using `crypto.timingSafeEqual` to eliminate timing side-channel attacks.
+   - Signed HMAC-SHA256 session tokens with 24-hour expiration window.
+   - Role-Based Access Control distinguishing `CUSTOMER` from `ADMIN`.
+2. **Database Access Policies & Tenant Isolation**:
+   - Row-level access policies enforce that customers can only view, poll, or cancel orders they created.
+   - Customer wallet balances and audit entries are strictly isolated per tenant.
+3. **Anti-DDoS Sliding Window Rate Limiting**:
+   - In-memory sliding window rate limiter protects endpoints from brute force and Denial of Service:
+     - Auth: 5 attempts/minute
+     - Number Purchases: 6 orders/minute
+     - SMS Polling: 60 polls/minute
+     - Wallet Deposits: 10 deposits/minute
+     - General API: 120 calls/minute
+   - Standard HTTP 429 response with `Retry-After` and `X-RateLimit-*` headers.
+4. **Encrypted Secrets & Customer Data Protection (`CryptoVault`)**:
+   - Authenticated AES-256-GCM encryption at rest with random 12-byte initialization vectors (IVs) and 16-byte authentication tags.
+   - Automatic masking of customer phone numbers (`+1 (***) ***-0199`) and secrets in logs.
+5. **Tamper-Evident Audit Logging (`AuditLogger`)**:
+   - Structured JSON audit log ledger capturing security events, wallet deposits, order creations, rate limit violations, and administrative actions.
+   - Sanitizes metadata to prevent secrets from entering persistent logs.
+6. **Payment Verification & Anti-Replay Defense (`PaymentVerifier`)**:
+   - Issues cryptographically signed HMAC-SHA256 payment intents.
+   - Enforces 5-minute maximum timestamp drift and single-use intent nonce cache preventing replay attacks.
+7. **Carrier Compliance & Anti-Abuse Rules (`AntiAbuseGuard`)**:
+   - Strictly enforces third-party carrier and platform policies.
+   - Quota limit: Maximum 5 concurrent active number reservations per customer to prevent bulk automated bot hoarding.
+   - Cooldown period: Minimum 1-3 second delay between consecutive purchases to block scripted harvesting.
+   - Clear Acceptable Use Policy prominently displayed in UI and via `/api/sms/policy`.
+8. **Real-Time Provider Health & Out-of-Stock Clear Guidance (`ProviderStatusTracker`)**:
+   - Live telemetry endpoint `/api/sms/status` tracks provider response latency (ms), operational state, and route inventory.
+   - Automatically translates raw upstream error codes (e.g. `no_numbers`, `NO_NUMBERS`) into clear, friendly guidance suggesting alternative high-stock countries.
+   - Only advertises service compatibility supported by verified provider data.
+
+### 🧪 Running Provider & Production Tests
 
 ```bash
-# Run the dedicated SMS-BUS automated test suite
-npm run test:sms
-# or
-node test_smsbus.js
+# Run the dedicated Production Security & Compliance test suite
+node test_sms_production.js
 
-# Run full project test suite (CycleCare + SMS-BUS)
+# Run the complete test suite (126 tests across 5 suites)
 npm test
 ```

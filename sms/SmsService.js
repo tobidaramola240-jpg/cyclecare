@@ -20,11 +20,24 @@ class SmsService {
    * @param {import('./SmsProviderRegistry')} params.registry
    * @param {import('./SmsOrderStore')} params.orderStore
    * @param {import('./CustomerWallet')} [params.wallet]
+   * @param {import('./AuditLogger')} [params.auditLogger]
+   * @param {import('./AntiAbuseGuard')} [params.antiAbuseGuard]
+   * @param {import('./ProviderStatusTracker')} [params.providerStatusTracker]
    */
-  constructor({ registry, orderStore, wallet = null }) {
+  constructor({
+    registry,
+    orderStore,
+    wallet = null,
+    auditLogger = null,
+    antiAbuseGuard = null,
+    providerStatusTracker = null,
+  }) {
     this.registry = registry;
     this.orderStore = orderStore;
     this.wallet = wallet || new CustomerWallet({ persistToDisk: false });
+    this.auditLogger = auditLogger;
+    this.antiAbuseGuard = antiAbuseGuard;
+    this.providerStatusTracker = providerStatusTracker;
   }
 
   /**
@@ -194,6 +207,18 @@ class SmsService {
         );
       }
 
+      // Check anti-abuse policies (concurrent orders limit, cooldown, velocity)
+      if (this.antiAbuseGuard) {
+        const activeOrders = this.orderStore.listOrders({ status: 'PENDING' }, resolvedCustomerId);
+        const check = this.antiAbuseGuard.evaluateOrderRequest({
+          customerId: resolvedCustomerId,
+          activeOrders,
+        });
+        if (!check.allowed) {
+          throw new SmsProviderError(check.reason, check.code, check.statusCode || 429);
+        }
+      }
+
       // 4. Reserve the required funds
       const holdId = `hold_${crypto.randomBytes(8).toString('hex')}`;
       this.wallet.reserveFunds(resolvedCustomerId, livePrice, holdId, {
@@ -236,6 +261,25 @@ class SmsService {
         providerRequestId: res.providerRequestId,
         description: `Number purchase for order ${order.id} (${res.number})`,
       });
+
+      if (this.antiAbuseGuard) {
+        this.antiAbuseGuard.recordPurchase(resolvedCustomerId);
+      }
+
+      if (this.auditLogger) {
+        this.auditLogger.log({
+          action: 'NUMBER_PURCHASED',
+          actorId: resolvedCustomerId,
+          resourceId: order.id,
+          status: 'SUCCESS',
+          metadata: {
+            number: res.number,
+            cost: livePrice,
+            countryId,
+            serviceId,
+          },
+        });
+      }
 
       const purchaseResult = {
         order: this.orderStore.toClientJson(order),
@@ -382,6 +426,16 @@ class SmsService {
 
     const updated = this.orderStore.cancelOrder(orderId, reason);
 
+    if (this.auditLogger) {
+      this.auditLogger.log({
+        action: 'ORDER_CANCELLED',
+        actorId: order.customerId || 'system',
+        resourceId: orderId,
+        status: 'SUCCESS',
+        metadata: { reason, refunded: order.cost > 0 },
+      });
+    }
+
     // If order had incurred cost, refund the customer's wallet
     if (order.cost > 0 && this.wallet && order.customerId) {
       try {
@@ -498,6 +552,18 @@ class SmsService {
         );
       }
 
+      // Check anti-abuse policies
+      if (this.antiAbuseGuard) {
+        const activeOrders = this.orderStore.listOrders({ status: 'PENDING' }, resolvedCustomerId);
+        const check = this.antiAbuseGuard.evaluateOrderRequest({
+          customerId: resolvedCustomerId,
+          activeOrders,
+        });
+        if (!check.allowed) {
+          throw new SmsProviderError(check.reason, check.code, check.statusCode || 429);
+        }
+      }
+
       // Reserve funds
       const holdId = `hold_rent_${crypto.randomBytes(8).toString('hex')}`;
       this.wallet.reserveFunds(resolvedCustomerId, rentalCost, holdId, { countryId, serviceId, days });
@@ -530,6 +596,26 @@ class SmsService {
         providerRequestId: res.providerRequestId,
         description: `Rental purchase for ${days} days (${res.number})`,
       });
+
+      if (this.antiAbuseGuard) {
+        this.antiAbuseGuard.recordPurchase(resolvedCustomerId);
+      }
+
+      if (this.auditLogger) {
+        this.auditLogger.log({
+          action: 'NUMBER_RENTED',
+          actorId: resolvedCustomerId,
+          resourceId: order.id,
+          status: 'SUCCESS',
+          metadata: {
+            number: res.number,
+            days,
+            cost: rentalCost,
+            countryId,
+            serviceId,
+          },
+        });
+      }
 
       const result = {
         order: this.orderStore.toClientJson(order),

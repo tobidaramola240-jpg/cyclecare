@@ -1,7 +1,16 @@
 /**
  * Unified SMS Provider Module Exports
  * 
- * Provides configured singleton and factory creation for SMS-BUS and extensible providers.
+ * Provides configured singletons and factory creation for:
+ * - SMS-BUS and extensible provider registry
+ * - 2PC Customer Wallet & Ledger
+ * - Cryptographic Security, Scrypt Auth, & RBAC (SecurityManager)
+ * - Anti-DDoS Sliding Window Rate Limiting (RateLimiter)
+ * - Cryptographic Payment Intent & Webhook Verification (PaymentVerifier)
+ * - Carrier Compliance & Anti-Abuse Guard (AntiAbuseGuard)
+ * - Real-Time Provider Health & Error Translation (ProviderStatusTracker)
+ * - Tamper-Evident Audit Logging (AuditLogger)
+ * - AES-256-GCM Encrypted Secrets Vault (CryptoVault)
  */
 
 const { BaseSmsProvider, SmsProviderError } = require('./BaseSmsProvider');
@@ -10,25 +19,49 @@ const SmsOrderStore = require('./SmsOrderStore');
 const SmsProviderRegistry = require('./SmsProviderRegistry');
 const SmsService = require('./SmsService');
 const CustomerWallet = require('./CustomerWallet');
+const { CryptoVault } = require('./CryptoVault');
+const AuditLogger = require('./AuditLogger');
+const SecurityManager = require('./SecurityManager');
+const RateLimiter = require('./RateLimiter');
+const PaymentVerifier = require('./PaymentVerifier');
+const AntiAbuseGuard = require('./AntiAbuseGuard');
+const ProviderStatusTracker = require('./ProviderStatusTracker');
 
-// Instantiate default registry
+// 1. Audit Logger
+const defaultAuditLogger = new AuditLogger();
+
+// 2. Security & RBAC Manager
+const defaultSecurityManager = new SecurityManager({ auditLogger: defaultAuditLogger });
+
+// 3. Sliding Window Rate Limiter
+const defaultRateLimiter = new RateLimiter({ auditLogger: defaultAuditLogger });
+
+// 4. Payment Intent & Webhook Verifier
+const defaultPaymentVerifier = new PaymentVerifier({ auditLogger: defaultAuditLogger });
+
+// 5. Anti-Abuse & Carrier Rules Guard
+const defaultAntiAbuseGuard = new AntiAbuseGuard({ auditLogger: defaultAuditLogger });
+
+// 6. Provider Health & Error Tracker
+const defaultProviderStatusTracker = new ProviderStatusTracker({ auditLogger: defaultAuditLogger });
+
+// 7. Provider Registry & SMS-BUS Adapter
 const defaultRegistry = new SmsProviderRegistry('smsbus');
-
-// Register SMS-BUS as default provider
 const defaultSmsBus = new SmsBusAdapter();
 defaultRegistry.register(defaultSmsBus, true);
 
-// Instantiate default order store
+// 8. Order Store & Customer Wallet
 const defaultOrderStore = new SmsOrderStore();
-
-// Instantiate default customer wallet store
 const defaultWallet = new CustomerWallet();
 
-// Instantiate default unified service
+// 9. Unified High-Level SMS Orchestration Service
 const defaultSmsService = new SmsService({
   registry: defaultRegistry,
   orderStore: defaultOrderStore,
   wallet: defaultWallet,
+  auditLogger: defaultAuditLogger,
+  antiAbuseGuard: defaultAntiAbuseGuard,
+  providerStatusTracker: defaultProviderStatusTracker,
 });
 
 module.exports = {
@@ -40,11 +73,24 @@ module.exports = {
   SmsProviderRegistry,
   SmsService,
   CustomerWallet,
+  CryptoVault,
+  AuditLogger,
+  SecurityManager,
+  RateLimiter,
+  PaymentVerifier,
+  AntiAbuseGuard,
+  ProviderStatusTracker,
 
-  // Default instances
+  // Default production instances
   defaultRegistry,
   defaultOrderStore,
   defaultWallet,
+  defaultAuditLogger,
+  defaultSecurityManager,
+  defaultRateLimiter,
+  defaultPaymentVerifier,
+  defaultAntiAbuseGuard,
+  defaultProviderStatusTracker,
   defaultSmsService,
 
   // Factory function for customized test or isolated environments
@@ -69,6 +115,28 @@ module.exports = {
       initialCredit: typeof options.initialCredit === 'number' ? options.initialCredit : 5.00,
     });
 
-    return new SmsService({ registry, orderStore, wallet });
+    const auditLogger = options.auditLogger || new AuditLogger({
+      persistToDisk: options.persistToDisk !== false,
+    });
+
+    const antiAbuseGuard = options.antiAbuseGuard || new AntiAbuseGuard({
+      auditLogger,
+      maxActiveOrders: options.maxActiveOrders || 3,
+      cooldownMs: options.cooldownMs !== undefined ? options.cooldownMs : 3000,
+      maxHourlyPurchases: options.maxHourlyPurchases || 10,
+    });
+
+    const providerStatusTracker = options.providerStatusTracker || new ProviderStatusTracker({
+      auditLogger,
+    });
+
+    return new SmsService({
+      registry,
+      orderStore,
+      wallet,
+      auditLogger,
+      antiAbuseGuard,
+      providerStatusTracker,
+    });
   },
 };

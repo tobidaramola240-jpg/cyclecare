@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "serve": "node server.js",
-    "test": "node test_cyclecare.js && node test_smsbus.js",
-    "test:sms": "node test_smsbus.js"
+    "test": "node test_cyclecare.js && node test_smsbus.js && node test_sms_app.js && node test_sms_wallet.js && node test_sms_production.js",
+    "test:sms": "node test_smsbus.js && node test_sms_app.js && node test_sms_wallet.js && node test_sms_production.js",
+    "test:production": "node test_sms_production.js"
   },
   "keywords": [
     "cyclecare",
