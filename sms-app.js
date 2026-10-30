@@ -82,8 +82,25 @@
     // Modals
     const [tenantModalOpen, setTenantModalOpen] = useState(false);
     const [customTenantInput, setCustomTenantInput] = useState(customerId);
-    const [authModalOpen, setAuthModalOpen] = useState(false);
-    const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+    const [authModalOpen, setAuthModalOpen] = useState(() => {
+      try {
+        if (typeof window !== 'undefined') {
+          return window.location.search.includes('login') ||
+                 window.location.search.includes('auth') ||
+                 window.location.pathname.endsWith('/login') ||
+                 window.location.pathname.endsWith('/register');
+        }
+      } catch (e) {}
+      return false;
+    });
+    const [authMode, setAuthMode] = useState(() => {
+      try {
+        if (typeof window !== 'undefined' && (window.location.search.includes('register') || window.location.pathname.endsWith('/register'))) {
+          return 'register';
+        }
+      } catch (e) {}
+      return 'login';
+    });
     const [authEmail, setAuthEmail] = useState('');
     const [authPassword, setAuthPassword] = useState('');
     const [authName, setAuthName] = useState('');

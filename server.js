@@ -197,7 +197,7 @@ Guidelines:
     localPath = '/index.html';
   } else if (parsedUrl === '/login' || parsedUrl === '/login-demo') {
     localPath = '/login-demo.html';
-  } else if (parsedUrl === '/sms' || parsedUrl === '/sms/' || parsedUrl === '/sms-app') {
+  } else if (parsedUrl === '/sms' || parsedUrl === '/sms/' || parsedUrl === '/sms-app' || parsedUrl === '/sms/login' || parsedUrl === '/sms/register') {
     localPath = '/sms.html';
   } else {
     localPath = parsedUrl;
