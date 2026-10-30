@@ -5853,6 +5853,10 @@
       try { return localStorage.getItem('cyclecare_gemini_api_key') || ''; } catch (e) { return ''; }
     });
     const [tempKeyInput, setTempKeyInput] = useState('');
+    const [keyTesting, setKeyTesting] = useState(false);
+    const [keyTestError, setKeyTestError] = useState(null);
+    const [keyTestSuccess, setKeyTestSuccess] = useState(false);
+
     const hasServerGemini = Boolean(typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.GEMINI_CONFIGURED);
     const isGeminiReady = Boolean(hasServerGemini || userGeminiKey);
 
@@ -5884,9 +5888,68 @@
 
       setTimeout(async () => {
         let answer = null;
+        let aiError = null;
 
-        // 1. Try Live Generative AI (Gemini 1.5 Flash) if key is present or server-configured
-        if (isGeminiReady || userGeminiKey) {
+        // 1. Direct browser call to Google Gemini if key is saved locally
+        if (userGeminiKey) {
+          try {
+            const systemInstruction = `You are Maya, an empathetic, highly knowledgeable, and medically responsible women's health companion inside CycleCare.
+Current User Context:
+- User Name: ${userName}
+- Current Cycle Day: Day ${currentDay} (${phaseTitle} Phase)
+- Phase Biology: ${cycleStatus?.phaseDescription || 'Natural hormonal rhythms'}
+
+Guidelines:
+1. Answer the user's specific question directly, warmly, conversationally, and insightfully—like ChatGPT, but tailored as an empathetic women's health companion.
+2. If the user asks casual, emotional, or philosophical questions (e.g. "can you be honest with me", "who are you", "tell me a joke", "how are you feeling"), answer warmly and genuinely like a caring companion. Do NOT force cycle explanations unless relevant.
+3. For medical, reproductive, menstrual, or nutritional questions, provide clear evidence-based guidance based on ACOG, WHO, and endocrine standards.
+4. Maintain medical responsibility: clarify that you provide clinical wellness awareness, not formal medical diagnosis. If symptoms are severe, red-flag, or persistent, kindly suggest consulting a licensed healthcare provider.
+5. Keep responses concise, warm, structured with bullet points where helpful.`;
+
+            const contents = [];
+            messages.slice(-6).forEach(msg => {
+              if (msg.sender && msg.text) {
+                contents.push({
+                  role: msg.sender === 'user' ? 'user' : 'model',
+                  parts: [{ text: msg.text }]
+                });
+              }
+            });
+            contents.push({
+              role: 'user',
+              parts: [{ text: q }]
+            });
+
+            const directUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(userGeminiKey)}`;
+            const directRes = await fetch(directUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                system_instruction: { parts: [{ text: systemInstruction }] },
+                contents: contents,
+                generationConfig: {
+                  temperature: 0.7,
+                  maxOutputTokens: 900,
+                }
+              })
+            });
+
+            const data = await directRes.json();
+            if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+              answer = {
+                title: 'Maya AI (Gemini 1.5 Flash)',
+                reply: data.candidates[0].content.parts[0].text,
+                sources: 'Powered by Google Gemini 1.5 Flash Generative Intelligence',
+              };
+            } else if (data.error) {
+              aiError = data.error.message || 'Gemini API returned an error';
+            }
+          } catch (netErr) {
+            console.warn('Direct Gemini call failed:', netErr);
+            aiError = netErr.message;
+          }
+        } else if (hasServerGemini) {
+          // 2. Call server-side /api/chat endpoint if server has key configured
           try {
             const apiRes = await fetch('/api/chat', {
               method: 'POST',
@@ -5896,7 +5959,6 @@
                 cycleStatus: cycleStatus || {},
                 profile: profile || {},
                 conversationHistory: messages.slice(-6),
-                apiKey: userGeminiKey || '',
               }),
             });
 
@@ -5906,26 +5968,36 @@
                 answer = {
                   title: data.title || 'Maya AI Companion',
                   reply: data.reply,
-                  sources: data.sources || 'Maya AI · Powered by Google Gemini 1.5 Flash (Generative Intelligence)',
+                  sources: data.sources || 'Maya AI · Powered by Google Gemini 1.5 Flash',
                 };
+              } else if (data.error) {
+                aiError = data.error;
               }
             }
-          } catch (netErr) {
-            console.warn('Live Gemini request fallback to on-device:', netErr);
+          } catch (serverErr) {
+            console.warn('Server chat request failed:', serverErr);
           }
         }
 
-        // 2. Seamless fallback to on-device clinical knowledge base
+        // 3. Fallback / Diagnostics
         if (!answer) {
-          try {
-            answer = askMayaAi(q, cycleStatus || {}, profile || {});
-          } catch (err) {
-            console.error('Maya AI processing error:', err);
+          if (aiError && (userGeminiKey || hasServerGemini)) {
             answer = {
-              title: 'Cycle Awareness',
-              reply: `Regarding "${q}": Hormonal rhythms across each phase influence energy and wellness. Prioritizing rest, hydration, and recording symptoms in your tracker helps build a clear personal cycle profile.`,
-              sources: 'ACOG Practice Guidelines',
+              title: '⚠️ Gemini AI Notice',
+              reply: `I tried connecting to Google Gemini, but encountered an error: "${aiError}".\n\nPlease tap "Gemini AI" at the top of this window to check or replace your API key, or clear the key to use my built-in clinical library.`,
+              sources: 'Google Gemini 1.5 Flash API Diagnostics',
             };
+          } else {
+            try {
+              answer = askMayaAi(q, cycleStatus || {}, profile || {});
+            } catch (err) {
+              console.error('Maya AI processing error:', err);
+              answer = {
+                title: 'Cycle Awareness',
+                reply: `Regarding "${q}": Hormonal rhythms across each phase influence energy and wellness. Prioritizing rest, hydration, and recording symptoms in your tracker helps build a clear personal cycle profile.`,
+                sources: 'ACOG Practice Guidelines',
+              };
+            }
           }
         }
 
@@ -5941,19 +6013,50 @@
       }, 350);
     };
 
-    const handleSaveGeminiKey = (e) => {
+    const handleSaveGeminiKey = async (e) => {
       e.preventDefault();
+      setKeyTestError(null);
+      setKeyTestSuccess(false);
       const clean = (tempKeyInput || '').trim();
+
+      if (!clean) {
+        try { localStorage.removeItem('cyclecare_gemini_api_key'); } catch (e) {}
+        setUserGeminiKey('');
+        setApiKeyModalOpen(false);
+        return;
+      }
+
+      setKeyTesting(true);
       try {
-        if (clean) {
-          localStorage.setItem('cyclecare_gemini_api_key', clean);
-          setUserGeminiKey(clean);
-        } else {
-          localStorage.removeItem('cyclecare_gemini_api_key');
-          setUserGeminiKey('');
+        const testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(clean)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: 'Hello' }] }]
+          })
+        });
+
+        const testData = await testRes.json();
+        if (testData.error) {
+          throw new Error(testData.error.message || 'Invalid Gemini API key.');
         }
-      } catch (err) {}
-      setApiKeyModalOpen(false);
+        if (!testData.candidates || testData.candidates.length === 0) {
+          throw new Error('Google Gemini API did not return candidates.');
+        }
+
+        // Verified!
+        try { localStorage.setItem('cyclecare_gemini_api_key', clean); } catch (e) {}
+        setUserGeminiKey(clean);
+        setKeyTestSuccess(true);
+        setTimeout(() => {
+          setApiKeyModalOpen(false);
+          setKeyTestSuccess(false);
+        }, 1200);
+      } catch (err) {
+        setKeyTestError(err.message || 'Failed to verify key with Google Gemini.');
+      } finally {
+        setKeyTesting(false);
+      }
     };
 
     const suggestedPrompts = [
@@ -5978,8 +6081,8 @@
                 h('h3', { className: 'font-extrabold text-base tracking-tight' }, 'Maya AI Companion'),
                 h('button', {
                   type: 'button',
-                  onClick: () => { setTempKeyInput(userGeminiKey); setApiKeyModalOpen(true); },
-                  className: `text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+                  onClick: () => { setTempKeyInput(userGeminiKey); setKeyTestError(null); setKeyTestSuccess(false); setApiKeyModalOpen(true); },
+                  className: `text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full border transition-all cursor-pointer ${
                     isGeminiReady
                       ? 'bg-emerald-500/30 text-emerald-100 border-emerald-300 shadow-xs'
                       : 'bg-white/20 hover:bg-white/30 text-white border-white/30'
@@ -6014,29 +6117,37 @@
             ),
             h('form', { onSubmit: handleSaveGeminiKey, className: 'space-y-3' },
               h('div', null,
-                h('label', { className: 'block text-xs font-bold text-slate-700 mb-1' }, 'Gemini API Key'),
+                h('label', { className: 'block text-xs font-bold text-slate-700 mb-1' }, 'Gemini API Key (starts with AIza...)'),
                 h('input', {
-                  type: 'password',
+                  type: 'text',
                   value: tempKeyInput,
                   onChange: (e) => setTempKeyInput(e.target.value),
                   placeholder: 'AIzaSy...',
                   className: 'w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-purple-400 focus:outline-none'
                 })
               ),
+              keyTestError && h('div', { className: 'p-3 rounded-xl bg-rose-50 border border-rose-200 text-[11px] text-rose-800 space-y-1' },
+                h('div', { className: 'font-bold' }, '❌ Google Rejected This Key:'),
+                h('p', null, keyTestError)
+              ),
+              keyTestSuccess && h('div', { className: 'p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800 font-bold' },
+                '✅ Verified! Maya is now powered by Google Gemini 1.5 Flash.'
+              ),
               h('div', { className: 'p-2.5 rounded-xl bg-purple-50 text-[11px] text-purple-900 space-y-1' },
-                h('div', { className: 'font-bold' }, '💡 How to get a free key (1 minute):'),
+                h('div', { className: 'font-bold' }, '💡 How to get a free key (takes 30 seconds):'),
                 h('p', null, '1. Go to ', h('a', { href: 'https://aistudio.google.com/app/apikey', target: '_blank', rel: 'noopener noreferrer', className: 'text-purple-700 underline font-semibold' }, 'aistudio.google.com'), ' and click "Create API key".'),
-                h('p', null, '2. Paste it here, or set GEMINI_API_KEY on your Render/Vercel dashboard.')
+                h('p', null, '2. Copy the key (starts with "AIza") and paste it here.')
               ),
               h('div', { className: 'flex gap-2 pt-1' },
                 h('button', {
                   type: 'submit',
-                  className: 'flex-1 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold text-xs shadow-sm hover:opacity-95'
-                }, 'Save & Activate AI ✨'),
+                  disabled: keyTesting,
+                  className: 'flex-1 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold text-xs shadow-sm hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-1.5'
+                }, keyTesting ? 'Verifying with Google...' : 'Test & Activate AI ✨'),
                 userGeminiKey && h('button', {
                   type: 'button',
                   onClick: () => {
-                    localStorage.removeItem('cyclecare_gemini_api_key');
+                    try { localStorage.removeItem('cyclecare_gemini_api_key'); } catch (e) {}
                     setUserGeminiKey('');
                     setTempKeyInput('');
                     setApiKeyModalOpen(false);
